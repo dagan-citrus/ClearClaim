@@ -12,6 +12,7 @@ import {
   OneClickEligibilityDTO,
   Claim,
   ClaimWithDetails,
+  UserPolicy,
 } from '@core/types';
 import {
   ClaimRepository,
@@ -54,14 +55,6 @@ export class ClaimProcessorService {
 
     // Create draft claim
     const claimId = generateUUID();
-    const claim: Partial<Claim> = {
-      appUserId,
-      extractedData,
-      status: ClaimStatus.DRAFT,
-      isOneClickEligible: false,
-      emailDraft: null,
-      submittedAt: null,
-    };
 
     // Store claim with ID
     const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();

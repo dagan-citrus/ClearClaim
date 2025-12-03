@@ -8,7 +8,6 @@ import {
   ExtractedReceiptData,
   PaymentMethod,
   LLMProcessingError,
-  ISODateString,
 } from '@core/types';
 import { z } from 'zod';
 
