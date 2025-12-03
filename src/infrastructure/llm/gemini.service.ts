@@ -252,7 +252,7 @@ Return ONLY the JSON object with these fields. Example format:
     const lineItemsText = receiptData.lineItems
       .map(
         (item, idx) =>
-          `${idx + 1}. ${item.description} - ${receiptData.currency} ${item.amount.toFixed(2)}`
+          `${idx + 1}. ${item.description} - ${receiptData.currency} ${item.amount.toFixed(2)} (Date: ${receiptData.receiptDate})`
       )
       .join('\n');
 
@@ -273,23 +273,49 @@ ${receiptData.receiptNumber ? `- Receipt Number: ${receiptData.receiptNumber}` :
 Line Items:
 ${lineItemsText}`;
 
-    const customInstructions = templatePrompt
-      ? `\n\nSPECIFIC REQUIREMENTS FOR ${insurerName}:\n${templatePrompt}`
-      : '';
+    // If custom template is provided, use it
+    if (templatePrompt && templatePrompt.trim().length > 0) {
+      return `${baseInstructions}
 
-    const defaultInstructions = `\n\nGenerate a clear, professional email that:
-1. States the purpose (insurance claim submission)
-2. Provides all relevant details in an organized format
-3. Is polite and professional
-4. Mentions that the original receipt/invoice is attached (if applicable)
-5. Requests confirmation of receipt and processing`;
-
-    return `${baseInstructions}${customInstructions}${defaultInstructions}
+SPECIFIC REQUIREMENTS FOR ${insurerName}:
+${templatePrompt}
 
 Return the email in this exact format:
 Subject: [appropriate subject line]
 
 [email body]`;
+    }
+
+    // Otherwise, use the default template format
+    const defaultTemplate = `
+Use the following DEFAULT template format:
+
+Subject: Insurance claim - ${insuredPersonName} - ${policyNumber}
+
+Title: Insurance claim for ${receiptData.serviceDescription}, ${insuredPersonName}, ${policyNumber}
+
+Dear ${insurerName},
+${receiptData.serviceDescription} was provided by ${receiptData.retailerName} on ${receiptData.receiptDate}.
+
+Insured user name: ${insuredPersonName}
+Insured user ID: [Use the policy number if available]
+Policy/identifier: ${policyNumber}
+Purpose: ${receiptData.serviceDescription}
+Date: ${receiptData.receiptDate}
+Total Sum: ${receiptData.currency} ${receiptData.totalAmount.toFixed(2)}
+
+Claims:
+${lineItemsText}
+
+Sincerely yours,
+${insuredPersonName}`;
+
+    return `${baseInstructions}${defaultTemplate}
+
+Generate the email following the DEFAULT template structure shown above. Return in this format:
+Subject: [subject line as shown in template]
+
+[email body as shown in template]`;
   }
 
   /**

@@ -59,7 +59,7 @@ export interface Insurer {
   insurerId: UUID;
   insurerName: string;
   claimsEmailTemplate: string;
-  templatePrompt: string; // Custom AI instructions for this insurer
+  templatePrompt: string; // Optional custom AI instructions (empty = use default template)
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

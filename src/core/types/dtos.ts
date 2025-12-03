@@ -34,7 +34,7 @@ export interface UpdateInsuredPersonDTO {
 export interface CreateInsurerDTO {
   insurerName: string;
   claimsEmailTemplate: string;
-  templatePrompt: string; // Custom AI instructions for this insurer
+  templatePrompt?: string; // Optional custom AI instructions (uses default if not provided)
 }
 
 /**
