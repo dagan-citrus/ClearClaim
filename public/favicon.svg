@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="45" fill="#4F46E5"/>
+
+  <!-- Receipt/Document -->
+  <rect x="30" y="25" width="40" height="50" rx="3" fill="white"/>
+
+  <!-- Receipt lines -->
+  <line x1="35" y1="35" x2="65" y2="35" stroke="#4F46E5" stroke-width="2" stroke-linecap="round"/>
+  <line x1="35" y1="42" x2="65" y2="42" stroke="#4F46E5" stroke-width="2" stroke-linecap="round"/>
+  <line x1="35" y1="49" x2="55" y2="49" stroke="#4F46E5" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Checkmark -->
+  <circle cx="50" cy="62" r="10" fill="#10B981"/>
+  <path d="M 45 62 L 48 65 L 55 58" stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

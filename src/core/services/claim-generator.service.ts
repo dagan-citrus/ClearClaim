@@ -199,8 +199,6 @@ export class ClaimGeneratorService {
    * Re-generate email when insurer changes
    */
   async regenerateForNewInsurer(claimId: UUID, newPolicyId: UUID): Promise<{ subject: string; body: string }> {
-    const claim = await this.claimRepository.findByIdOrThrow(claimId);
-
     // Update the policy
     await this.claimRepository.update(claimId, {
       policyId: newPolicyId,

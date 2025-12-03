@@ -6,7 +6,6 @@ import {
   UUID,
   ISODateString,
   PolicyType,
-  PaymentMethod,
   SubscriptionTier,
 } from './common';
 
