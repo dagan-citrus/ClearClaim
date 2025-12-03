@@ -75,11 +75,19 @@ export interface AllocateLineItemDTO {
 }
 
 /**
+ * Image data for claim processing
+ */
+export interface ClaimImageData {
+  data: string; // Base64 encoded image
+  type: string; // MIME type
+  description?: string; // Optional description (e.g., "Invoice", "Doctor's Summary")
+}
+
+/**
  * DTO for creating a new claim
  */
 export interface CreateClaimDTO {
-  imageData: string; // Base64 encoded image
-  imageType: string; // MIME type
+  images: ClaimImageData[]; // Array of images (invoice, doctor's summary, medicine list, etc.)
 }
 
 /**

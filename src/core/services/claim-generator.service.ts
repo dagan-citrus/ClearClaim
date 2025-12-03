@@ -53,6 +53,7 @@ export class ClaimGeneratorService {
       person.fullName,
       policy.policyNumber,
       insurer.insurerName,
+      person.dateOfBirth,
       insurer.templatePrompt || undefined
     );
 

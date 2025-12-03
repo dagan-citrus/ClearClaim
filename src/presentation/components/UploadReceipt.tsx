@@ -41,8 +41,11 @@ export const UploadReceipt: React.FC = () => {
       // Process with One-Click service
       const oneClickService = container.oneClickClaimService;
       const result = await oneClickService.processOneClickClaim(user.uid, {
-        imageData: base64,
-        imageType: file.type,
+        images: [{
+          data: base64.split(',')[1], // Remove data URL prefix
+          type: file.type,
+          description: file.name,
+        }],
       });
 
       if (result.isEligible) {

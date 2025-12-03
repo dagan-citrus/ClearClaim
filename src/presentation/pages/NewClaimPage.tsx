@@ -18,15 +18,20 @@ import {
   User,
   CreditCard,
   Loader,
+  X,
 } from 'lucide-react';
 
 type UploadStage = 'upload' | 'processing' | 'review' | 'generating' | 'complete';
 
+interface SelectedFile {
+  file: File;
+  preview: string;
+}
+
 export const NewClaimPage: React.FC = () => {
   const { user } = useAuth();
   const [stage, setStage] = useState<UploadStage>('upload');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Extracted data
@@ -44,42 +49,58 @@ export const NewClaimPage: React.FC = () => {
   const [emailBody, setEmailBody] = useState<string>('');
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      setError('Please select an image file');
-      return;
+    // Validate all files
+    const validFiles: SelectedFile[] = [];
+    let hasError = false;
+
+    for (const file of files) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setError(`${file.name} is not an image file`);
+        hasError = true;
+        break;
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError(`${file.name} exceeds 10MB size limit`);
+        hasError = true;
+        break;
+      }
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const preview = e.target?.result as string;
+        validFiles.push({ file, preview });
+
+        // Update state when all previews are loaded
+        if (validFiles.length === files.length) {
+          setSelectedFiles((prev) => [...prev, ...validFiles]);
+        }
+      };
+      reader.readAsDataURL(file);
     }
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Image size must be less than 10MB');
-      return;
+    if (!hasError) {
+      setError(null);
     }
-
-    setSelectedFile(file);
-    setError(null);
-
-    // Create preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreviewUrl(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleDrop = (event: React.DragEvent) => {
     event.preventDefault();
-    const file = event.dataTransfer.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length === 0) return;
 
     // Create synthetic event for handleFileSelect
     const input = document.createElement('input');
     input.type = 'file';
+    input.multiple = true;
     const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
+    files.forEach((file) => dataTransfer.items.add(file));
     input.files = dataTransfer.files;
 
     handleFileSelect({ target: input } as any);
@@ -89,20 +110,32 @@ export const NewClaimPage: React.FC = () => {
     event.preventDefault();
   };
 
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleUploadAndProcess = async () => {
-    if (!selectedFile || !user) return;
+    if (selectedFiles.length === 0 || !user) return;
 
     try {
       setStage('processing');
       setError(null);
 
-      // Convert image to base64
-      const base64 = await fileToBase64(selectedFile);
+      // Convert all images to base64
+      const images = await Promise.all(
+        selectedFiles.map(async (sf) => {
+          const base64 = await fileToBase64(sf.file);
+          return {
+            data: base64,
+            type: sf.file.type,
+            description: sf.file.name,
+          };
+        })
+      );
 
-      // Process receipt
+      // Process receipt with all images
       const result = await container.claimProcessorService.processReceipt(user.uid, {
-        imageData: base64,
-        imageType: selectedFile.type,
+        images,
       });
 
       setClaimId(result.claimId);
@@ -181,8 +214,7 @@ export const NewClaimPage: React.FC = () => {
 
   const handleReset = () => {
     setStage('upload');
-    setSelectedFile(null);
-    setPreviewUrl(null);
+    setSelectedFiles([]);
     setError(null);
     setClaimId(null);
     setExtractedData(null);
@@ -221,32 +253,49 @@ export const NewClaimPage: React.FC = () => {
             onDragOver={handleDragOver}
             className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-indigo-400 transition-colors"
           >
-            {previewUrl ? (
-              <div className="space-y-4">
-                <img
-                  src={previewUrl}
-                  alt="Preview"
-                  className="max-h-64 mx-auto rounded-lg shadow-md"
-                />
+            {selectedFiles.length > 0 ? (
+              <div className="space-y-6">
+                {/* Image Previews */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {selectedFiles.map((sf, idx) => (
+                    <div key={idx} className="relative group">
+                      <img
+                        src={sf.preview}
+                        alt={`Preview ${idx + 1}`}
+                        className="w-full h-40 object-cover rounded-lg shadow-md"
+                      />
+                      <button
+                        onClick={() => removeFile(idx)}
+                        className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                      <p className="text-xs text-gray-600 mt-1 truncate">{sf.file.name}</p>
+                    </div>
+                  ))}
+                </div>
+
                 <div className="flex items-center justify-center gap-2 text-sm text-gray-600">
                   <FileImage className="w-4 h-4" />
-                  {selectedFile?.name}
+                  {selectedFiles.length} image{selectedFiles.length > 1 ? 's' : ''} selected
                 </div>
+
                 <div className="flex gap-3 justify-center">
+                  <label className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+                    Add More Images
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                  </label>
                   <button
                     onClick={handleUploadAndProcess}
                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                   >
-                    Process Receipt
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedFile(null);
-                      setPreviewUrl(null);
-                    }}
-                    className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                  >
-                    Choose Different Image
+                    Process {selectedFiles.length} Image{selectedFiles.length > 1 ? 's' : ''}
                   </button>
                 </div>
               </div>
@@ -254,18 +303,24 @@ export const NewClaimPage: React.FC = () => {
               <div className="space-y-4">
                 <Upload className="w-12 h-12 text-gray-400 mx-auto" />
                 <div>
-                  <p className="text-gray-600 mb-2">Drag and drop an image here, or</p>
+                  <p className="text-gray-600 mb-2">
+                    Drag and drop images here, or click to select
+                  </p>
+                  <p className="text-sm text-gray-500 mb-4">
+                    You can upload multiple images (invoice, doctor's summary, medicine list, etc.)
+                  </p>
                   <label className="inline-block px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer">
-                    Choose File
+                    Choose Files
                     <input
                       type="file"
                       accept="image/*"
+                      multiple
                       onChange={handleFileSelect}
                       className="hidden"
                     />
                   </label>
                 </div>
-                <p className="text-xs text-gray-500">Supports JPG, PNG (max 10MB)</p>
+                <p className="text-xs text-gray-500">Supports JPG, PNG (max 10MB per file)</p>
               </div>
             )}
           </div>
@@ -283,9 +338,11 @@ export const NewClaimPage: React.FC = () => {
       {stage === 'processing' && (
         <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
           <Loader className="w-12 h-12 text-indigo-600 mx-auto mb-4 animate-spin" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Receipt...</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            Processing {selectedFiles.length} Image{selectedFiles.length > 1 ? 's' : ''}...
+          </h3>
           <p className="text-gray-600">
-            Extracting data from your receipt using AI. This may take a moment.
+            Extracting data from your documents using AI. This may take a moment.
           </p>
         </div>
       )}
@@ -296,9 +353,12 @@ export const NewClaimPage: React.FC = () => {
           <div className="flex items-start gap-3">
             <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-1" />
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Receipt Processed Successfully</h3>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Documents Processed Successfully
+              </h3>
               <p className="text-sm text-gray-600">
-                Confidence: {extractedData.extractionConfidence}%
+                Confidence: {extractedData.extractionConfidence}% | Claim Type:{' '}
+                {extractedData.claimType || 'Medical Consultation'}
               </p>
             </div>
           </div>
@@ -308,7 +368,7 @@ export const NewClaimPage: React.FC = () => {
             <h4 className="font-medium text-gray-900 mb-3">Extracted Information</h4>
             <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
               <div>
-                <label className="text-xs font-medium text-gray-500">Retailer</label>
+                <label className="text-xs font-medium text-gray-500">Medical Facility</label>
                 <p className="text-sm text-gray-900">{extractedData.retailerName}</p>
               </div>
               <div>
@@ -325,6 +385,22 @@ export const NewClaimPage: React.FC = () => {
                   {extractedData.currency} {extractedData.totalAmount.toFixed(2)}
                 </p>
               </div>
+              {extractedData.doctorName && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500">Doctor</label>
+                  <p className="text-sm text-gray-900">
+                    {extractedData.doctorTitle} {extractedData.doctorName}
+                  </p>
+                </div>
+              )}
+              {extractedData.medicalIssues && extractedData.medicalIssues.length > 0 && (
+                <div className="col-span-2">
+                  <label className="text-xs font-medium text-gray-500">Medical Issues</label>
+                  <p className="text-sm text-gray-900">
+                    {extractedData.medicalIssues.join(', ')}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -414,7 +490,8 @@ export const NewClaimPage: React.FC = () => {
             <div>
               <h3 className="text-lg font-semibold text-gray-900">Claim Created Successfully!</h3>
               <p className="text-sm text-gray-600">
-                Your email draft has been generated and saved. You can view and edit it in the Claims tab.
+                Your email draft has been generated and saved. You can view and edit it in the
+                Claims tab.
               </p>
             </div>
           </div>
@@ -429,7 +506,7 @@ export const NewClaimPage: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500">Body:</label>
-                <p className="text-sm text-gray-900 mt-1 whitespace-pre-wrap line-clamp-6">
+                <p className="text-sm text-gray-900 mt-1 whitespace-pre-wrap line-clamp-10">
                   {emailBody}
                 </p>
               </div>

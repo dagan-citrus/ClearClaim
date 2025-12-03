@@ -38,7 +38,7 @@ export class ClaimProcessorService {
   ) {}
 
   /**
-   * Process receipt image and create draft claim
+   * Process receipt images and create draft claim
    */
   async processReceipt(
     appUserId: UUID,
@@ -47,11 +47,8 @@ export class ClaimProcessorService {
     // Enforce subscription limits
     await this.subscriptionService.enforceClaimSubmissionLimit(appUserId);
 
-    // Extract receipt data using Gemini
-    const extractedData = await this.geminiService.extractReceiptData(
-      dto.imageData,
-      dto.imageType
-    );
+    // Extract receipt data from all images using Gemini
+    const extractedData = await this.geminiService.extractReceiptData(dto.images);
 
     // Create draft claim
     const claimId = generateUUID();

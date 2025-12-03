@@ -105,6 +105,17 @@ export interface ExtractedReceiptData {
   lineItems: ReceiptLineItem[];
   extractionConfidence: number; // 0-100 percentage
   rawText?: string;
+
+  // Medical claim specific fields
+  doctorName?: string;
+  doctorTitle?: string;
+  clinicAddress?: string;
+  visitDate?: ISODateString;
+  medicalIssues?: string[]; // List of medical issues addressed
+  prescriptions?: string[]; // List of prescribed medications/treatments
+  recommendations?: string; // Additional recommendations
+  claimType?: string; // Type of claim (e.g., "Medical Consultation", "Dental Treatment")
+  attachmentDescriptions?: string[]; // Descriptions of attached documents
 }
 
 /**
