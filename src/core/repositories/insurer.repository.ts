@@ -19,6 +19,7 @@ export class InsurerRepository extends BaseRepository<Insurer> {
       insurerId: id,
       insurerName: data.insurerName,
       claimsEmailTemplate: data.claimsEmailTemplate,
+      templatePrompt: data.templatePrompt || '', // Default to empty string for backward compatibility
       createdAt: this.fromFirestoreTimestamp(data.createdAt),
       updatedAt: this.fromFirestoreTimestamp(data.updatedAt),
     };
@@ -30,6 +31,7 @@ export class InsurerRepository extends BaseRepository<Insurer> {
     if (entity.insurerName !== undefined) data.insurerName = entity.insurerName;
     if (entity.claimsEmailTemplate !== undefined)
       data.claimsEmailTemplate = entity.claimsEmailTemplate;
+    if (entity.templatePrompt !== undefined) data.templatePrompt = entity.templatePrompt;
 
     return data;
   }

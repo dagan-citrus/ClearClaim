@@ -110,7 +110,29 @@ export class ClaimProcessorService {
       };
     }
 
-    // Get user's insured persons
+    // Try to auto-match using extracted policy number first
+    if (extractedData.policyNumber) {
+      const matchedPolicy = await this.findPolicyByNumber(
+        appUserId,
+        extractedData.policyNumber
+      );
+
+      if (matchedPolicy) {
+        const person = await this.insuredPersonRepository.findByIdOrThrow(
+          matchedPolicy.personId
+        );
+
+        return {
+          isEligible: true,
+          confidence: extractedData.extractionConfidence,
+          suggestedPersonId: person.personId,
+          suggestedPolicyId: matchedPolicy.policyId,
+          estimatedAmount: extractedData.totalAmount,
+        };
+      }
+    }
+
+    // Fallback to single person + default policy logic
     const insuredPersons = await this.insuredPersonRepository.findByUserId(appUserId);
     if (insuredPersons.length === 0) {
       return {
@@ -119,7 +141,7 @@ export class ClaimProcessorService {
       };
     }
 
-    // If more than one person, we can't auto-select
+    // If more than one person and no policy number match, require manual selection
     if (insuredPersons.length > 1) {
       return {
         isEligible: false,
@@ -149,6 +171,31 @@ export class ClaimProcessorService {
       suggestedPolicyId: defaultPolicy.policyId,
       estimatedAmount: extractedData.totalAmount,
     };
+  }
+
+  /**
+   * Find policy by policy number for a user
+   */
+  private async findPolicyByNumber(
+    appUserId: UUID,
+    policyNumber: string
+  ): Promise<UserPolicy | null> {
+    // Get all insured persons for this user
+    const insuredPersons = await this.insuredPersonRepository.findByUserId(appUserId);
+
+    // Search through all policies for all persons
+    for (const person of insuredPersons) {
+      const policies = await this.policyRepository.findByPersonId(person.personId);
+      const matchedPolicy = policies.find(
+        (p) => p.policyNumber.toLowerCase() === policyNumber.toLowerCase()
+      );
+
+      if (matchedPolicy) {
+        return matchedPolicy;
+      }
+    }
+
+    return null;
   }
 
   /**

@@ -21,6 +21,7 @@ export class ClaimRepository extends BaseRepository<Claim> {
       personId: data.personId,
       policyId: data.policyId,
       extractedData: data.extractedData,
+      emailSubject: data.emailSubject || null,
       emailDraft: data.emailDraft || null,
       status: data.status as ClaimStatus,
       isOneClickEligible: data.isOneClickEligible || false,
@@ -40,6 +41,7 @@ export class ClaimRepository extends BaseRepository<Claim> {
     if (entity.policyId !== undefined) data.policyId = entity.policyId;
     if (entity.extractedData !== undefined)
       data.extractedData = entity.extractedData;
+    if (entity.emailSubject !== undefined) data.emailSubject = entity.emailSubject;
     if (entity.emailDraft !== undefined) data.emailDraft = entity.emailDraft;
     if (entity.status !== undefined) data.status = entity.status;
     if (entity.isOneClickEligible !== undefined)

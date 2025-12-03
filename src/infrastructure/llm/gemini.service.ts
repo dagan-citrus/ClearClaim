@@ -23,6 +23,7 @@ const receiptDataSchema = z.object({
   currency: z.string().default('USD'),
   invoiceNumber: z.string().optional(),
   receiptNumber: z.string().optional(),
+  policyNumber: z.string().optional(),
   paymentMethod: z.nativeEnum(PaymentMethod),
   lineItems: z
     .array(
@@ -103,28 +104,88 @@ export class GeminiService {
   }
 
   /**
-   * Generate claim email draft
+   * Generate claim email draft with subject and body
    */
   async generateClaimEmail(
     receiptData: ExtractedReceiptData,
     insuredPersonName: string,
     policyNumber: string,
-    insurerName: string
-  ): Promise<string> {
+    insurerName: string,
+    templatePrompt?: string
+  ): Promise<{ subject: string; body: string }> {
     try {
       const prompt = this.buildClaimEmailPrompt(
         receiptData,
         insuredPersonName,
         policyNumber,
-        insurerName
+        insurerName,
+        templatePrompt
       );
 
       const result = await this.model.generateContent(prompt);
       const response = await result.response;
-      return response.text().trim();
+      const text = response.text().trim();
+
+      // Extract subject and body
+      const subjectMatch = text.match(/Subject:\s*(.+?)(?:\n|$)/i);
+      const subject = subjectMatch
+        ? subjectMatch[1].trim()
+        : `Insurance Claim - Policy ${policyNumber} - ${receiptData.serviceDescription}`;
+
+      // Remove subject line from body if present
+      const body = text
+        .replace(/Subject:\s*.+?(?:\n|$)/i, '')
+        .trim();
+
+      return { subject, body };
     } catch (error) {
       throw new LLMProcessingError(
         `Failed to generate claim email: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Refine existing email draft with natural language instructions
+   */
+  async refineDraft(
+    currentSubject: string,
+    currentBody: string,
+    refinementPrompt: string
+  ): Promise<{ subject: string; body: string }> {
+    try {
+      const prompt = `You are refining an insurance claim email based on user feedback.
+
+Current Subject: ${currentSubject}
+
+Current Email Body:
+${currentBody}
+
+User's Refinement Request: ${refinementPrompt}
+
+Please revise the email body according to the user's request while maintaining professionalism and all necessary claim details. You may also update the subject line if the refinement request implies it should change.
+
+Return the refined email in this exact format:
+Subject: [subject line here]
+
+[email body here]`;
+
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().trim();
+
+      // Extract subject and body
+      const subjectMatch = text.match(/Subject:\s*(.+?)(?:\n|$)/i);
+      const subject = subjectMatch ? subjectMatch[1].trim() : currentSubject;
+
+      const body = text
+        .replace(/Subject:\s*.+?(?:\n|$)/i, '')
+        .trim();
+
+      return { subject, body };
+    } catch (error) {
+      throw new LLMProcessingError(
+        `Failed to refine email draft: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
@@ -145,12 +206,13 @@ Extract the following information:
 5. currency: Currency code (default to "USD" if not specified)
 6. invoiceNumber: Invoice number if present (optional)
 7. receiptNumber: Receipt number if present (optional)
-8. paymentMethod: One of: CASH, CREDIT_CARD, DEBIT_CARD, CHECK, BANK_TRANSFER, OTHER
-9. lineItems: Array of line items, each with:
+8. policyNumber: Insurance policy/member number if visible on receipt (optional)
+9. paymentMethod: One of: CASH, CREDIT_CARD, DEBIT_CARD, CHECK, BANK_TRANSFER, OTHER
+10. lineItems: Array of line items, each with:
    - description: Item/service description
    - amount: Item amount (as a number)
    - quantity: Quantity if specified (optional)
-10. extractionConfidence: Your confidence level in the extraction (0-100)
+11. extractionConfidence: Your confidence level in the extraction (0-100)
 
 Return ONLY the JSON object with these fields. Example format:
 {
@@ -184,7 +246,8 @@ Return ONLY the JSON object with these fields. Example format:
     receiptData: ExtractedReceiptData,
     insuredPersonName: string,
     policyNumber: string,
-    insurerName: string
+    insurerName: string,
+    templatePrompt?: string
   ): string {
     const lineItemsText = receiptData.lineItems
       .map(
@@ -193,7 +256,7 @@ Return ONLY the JSON object with these fields. Example format:
       )
       .join('\n');
 
-    return `Generate a professional insurance claim email for submission.
+    const baseInstructions = `Generate a professional insurance claim email for submission.
 
 Claim Details:
 - Insured Person: ${insuredPersonName}
@@ -208,16 +271,25 @@ ${receiptData.invoiceNumber ? `- Invoice Number: ${receiptData.invoiceNumber}` :
 ${receiptData.receiptNumber ? `- Receipt Number: ${receiptData.receiptNumber}` : ''}
 
 Line Items:
-${lineItemsText}
+${lineItemsText}`;
 
-Generate a clear, professional email that:
+    const customInstructions = templatePrompt
+      ? `\n\nSPECIFIC REQUIREMENTS FOR ${insurerName}:\n${templatePrompt}`
+      : '';
+
+    const defaultInstructions = `\n\nGenerate a clear, professional email that:
 1. States the purpose (insurance claim submission)
 2. Provides all relevant details in an organized format
 3. Is polite and professional
 4. Mentions that the original receipt/invoice is attached (if applicable)
-5. Requests confirmation of receipt and processing
+5. Requests confirmation of receipt and processing`;
 
-Return ONLY the email body text, without subject line or salutation (we'll add those separately).`;
+    return `${baseInstructions}${customInstructions}${defaultInstructions}
+
+Return the email in this exact format:
+Subject: [appropriate subject line]
+
+[email body]`;
   }
 
   /**

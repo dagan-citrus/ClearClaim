@@ -59,6 +59,7 @@ export interface Insurer {
   insurerId: UUID;
   insurerName: string;
   claimsEmailTemplate: string;
+  templatePrompt: string; // Custom AI instructions for this insurer
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -99,6 +100,7 @@ export interface ExtractedReceiptData {
   currency: string;
   invoiceNumber?: string;
   receiptNumber?: string;
+  policyNumber?: string; // Extracted policy number for auto-matching
   paymentMethod: PaymentMethod;
   lineItems: ReceiptLineItem[];
   extractionConfidence: number; // 0-100 percentage
@@ -114,7 +116,8 @@ export interface Claim {
   personId: UUID;
   policyId: UUID;
   extractedData: ExtractedReceiptData;
-  emailDraft: string | null;
+  emailSubject: string | null; // Generated email subject
+  emailDraft: string | null; // Generated email body
   status: ClaimStatus;
   isOneClickEligible: boolean;
   submittedAt: Timestamp | null;

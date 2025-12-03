@@ -34,6 +34,16 @@ export interface UpdateInsuredPersonDTO {
 export interface CreateInsurerDTO {
   insurerName: string;
   claimsEmailTemplate: string;
+  templatePrompt: string; // Custom AI instructions for this insurer
+}
+
+/**
+ * DTO for updating an insurer
+ */
+export interface UpdateInsurerDTO {
+  insurerName?: string;
+  claimsEmailTemplate?: string;
+  templatePrompt?: string;
 }
 
 /**
@@ -115,4 +125,20 @@ export interface OneClickEligibilityDTO {
   suggestedPersonId?: UUID;
   suggestedPolicyId?: UUID;
   estimatedAmount?: number;
+}
+
+/**
+ * DTO for refining email draft with natural language
+ */
+export interface RefineDraftDTO {
+  claimId: UUID;
+  refinementPrompt: string; // Natural language instruction (e.g., "make it more urgent")
+}
+
+/**
+ * DTO for generating email with custom template
+ */
+export interface GenerateEmailDTO {
+  claimId: UUID;
+  templatePrompt?: string; // Optional override for insurer template
 }

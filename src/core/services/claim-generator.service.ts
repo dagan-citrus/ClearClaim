@@ -30,9 +30,9 @@ export class ClaimGeneratorService {
   ) {}
 
   /**
-   * Generate email draft for a claim
+   * Generate email draft for a claim with insurer-specific template
    */
-  async generateEmailDraft(claimId: UUID): Promise<string> {
+  async generateEmailDraft(claimId: UUID): Promise<{ subject: string; body: string }> {
     const claim = await this.claimRepository.findByIdOrThrow(claimId);
 
     if (!claim.personId || !claim.policyId) {
@@ -47,21 +47,53 @@ export class ClaimGeneratorService {
 
     const insurer = await this.insurerRepository.findByIdOrThrow(policy.insurerId);
 
-    // Generate email using Gemini
-    const emailDraft = await this.geminiService.generateClaimEmail(
+    // Generate email using Gemini with insurer's template prompt
+    const { subject, body } = await this.geminiService.generateClaimEmail(
       claim.extractedData,
       person.fullName,
       policy.policyNumber,
-      insurer.insurerName
+      insurer.insurerName,
+      insurer.templatePrompt || undefined
     );
 
     // Save draft to claim
     await this.claimRepository.update(claimId, {
-      emailDraft,
+      emailSubject: subject,
+      emailDraft: body,
       status: ClaimStatus.READY_FOR_REVIEW,
     } as Partial<Claim>);
 
-    return emailDraft;
+    return { subject, body };
+  }
+
+  /**
+   * Refine email draft with natural language instructions
+   */
+  async refineDraft(
+    claimId: UUID,
+    refinementPrompt: string
+  ): Promise<{ subject: string; body: string }> {
+    const claim = await this.claimRepository.findByIdOrThrow(claimId);
+
+    if (!claim.emailSubject || !claim.emailDraft) {
+      throw new Error('Claim must have an existing draft to refine');
+    }
+
+    // Refine the draft using Gemini
+    const { subject, body } = await this.geminiService.refineDraft(
+      claim.emailSubject,
+      claim.emailDraft,
+      refinementPrompt
+    );
+
+    // Save refined draft
+    await this.claimRepository.update(claimId, {
+      emailSubject: subject,
+      emailDraft: body,
+      status: ClaimStatus.READY_FOR_REVIEW,
+    } as Partial<Claim>);
+
+    return { subject, body };
   }
 
   /**
@@ -70,6 +102,12 @@ export class ClaimGeneratorService {
   async getEmailSubject(claimId: UUID): Promise<string> {
     const claim = await this.claimRepository.findByIdOrThrow(claimId);
 
+    // Return saved subject if available
+    if (claim.emailSubject) {
+      return claim.emailSubject;
+    }
+
+    // Fallback to generated subject if no custom subject
     if (!claim.policyId) {
       throw new Error('Claim must have policy assigned');
     }
@@ -155,5 +193,20 @@ export class ClaimGeneratorService {
       body: claim.emailDraft,
       recipient,
     };
+  }
+
+  /**
+   * Re-generate email when insurer changes
+   */
+  async regenerateForNewInsurer(claimId: UUID, newPolicyId: UUID): Promise<{ subject: string; body: string }> {
+    const claim = await this.claimRepository.findByIdOrThrow(claimId);
+
+    // Update the policy
+    await this.claimRepository.update(claimId, {
+      policyId: newPolicyId,
+    } as Partial<Claim>);
+
+    // Regenerate the email draft with the new insurer's template
+    return this.generateEmailDraft(claimId);
   }
 }
