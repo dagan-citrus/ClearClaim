@@ -99,3 +99,14 @@ export class DatabaseError extends AppError {
     Object.setPrototypeOf(this, DatabaseError.prototype);
   }
 }
+
+/**
+ * Email sending errors
+ */
+export class EmailSendingError extends AppError {
+  constructor(message: string = 'Failed to send email') {
+    super(message, 'EMAIL_ERROR', 500);
+    this.name = 'EmailSendingError';
+    Object.setPrototypeOf(this, EmailSendingError.prototype);
+  }
+}
