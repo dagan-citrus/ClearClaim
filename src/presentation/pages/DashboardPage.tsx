@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@presentation/contexts/AuthContext';
+import { useNavigation } from '@presentation/contexts/NavigationContext';
 import { container } from '@core/container';
 import {
   Claim,
@@ -24,6 +25,7 @@ import {
 
 export const DashboardPage: React.FC = () => {
   const { user, appUser } = useAuth();
+  const { setActiveTab, setShouldOpenFilePicker } = useNavigation();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalClaims: 0,
@@ -265,7 +267,13 @@ export const DashboardPage: React.FC = () => {
           <div className="p-12 text-center">
             <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-500 mb-4">No claims yet</p>
-            <button className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+            <button
+              onClick={() => {
+                setActiveTab('new-claim');
+                setShouldOpenFilePicker(true);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
               <PlusCircle className="w-4 h-4" />
               Create Your First Claim
             </button>

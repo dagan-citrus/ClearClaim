@@ -2,8 +2,9 @@
  * New Claim Page - Upload and create new claims
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@presentation/contexts/AuthContext';
+import { useNavigation } from '@presentation/contexts/NavigationContext';
 import { container } from '@core/container';
 import {
   ExtractedReceiptData,
@@ -19,6 +20,8 @@ import {
   CreditCard,
   Loader,
   X,
+  FileText,
+  FileIcon,
 } from 'lucide-react';
 
 type UploadStage = 'upload' | 'processing' | 'review' | 'generating' | 'complete';
@@ -30,6 +33,9 @@ interface SelectedFile {
 
 export const NewClaimPage: React.FC = () => {
   const { user } = useAuth();
+  const { shouldOpenFilePicker, setShouldOpenFilePicker } = useNavigation();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [stage, setStage] = useState<UploadStage>('upload');
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +54,71 @@ export const NewClaimPage: React.FC = () => {
   const [emailSubject, setEmailSubject] = useState<string>('');
   const [emailBody, setEmailBody] = useState<string>('');
 
+  // Listen for file picker trigger from dashboard
+  useEffect(() => {
+    if (shouldOpenFilePicker && fileInputRef.current) {
+      fileInputRef.current.click();
+      setShouldOpenFilePicker(false);
+    }
+  }, [shouldOpenFilePicker, setShouldOpenFilePicker]);
+
+  // Helper to check if file type is supported
+  const isSupportedFileType = (file: File): boolean => {
+    const imageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    const pdfType = 'application/pdf';
+    const textTypes = ['text/plain', 'text/csv'];
+
+    return (
+      imageTypes.includes(file.type) ||
+      file.type === pdfType ||
+      textTypes.includes(file.type) ||
+      file.name.toLowerCase().endsWith('.pdf') ||
+      file.name.toLowerCase().endsWith('.txt') ||
+      file.name.toLowerCase().endsWith('.csv')
+    );
+  };
+
+  // Helper to get file type
+  const getFileType = (file: File): 'image' | 'pdf' | 'text' => {
+    if (file.type.startsWith('image/')) return 'image';
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
+      return 'pdf';
+    return 'text';
+  };
+
+  // Helper to render preview based on file type
+  const renderFilePreview = (sf: SelectedFile) => {
+    const fileType = getFileType(sf.file);
+
+    if (fileType === 'image') {
+      return (
+        <img
+          src={sf.preview}
+          alt={sf.file.name}
+          className="w-full h-40 object-cover rounded-lg shadow-md"
+        />
+      );
+    } else if (fileType === 'pdf') {
+      return (
+        <div className="w-full h-40 bg-red-50 rounded-lg shadow-md flex items-center justify-center">
+          <div className="text-center">
+            <FileText className="w-8 h-8 text-red-600 mx-auto mb-2" />
+            <p className="text-xs text-red-600 font-medium">PDF</p>
+          </div>
+        </div>
+      );
+    } else {
+      return (
+        <div className="w-full h-40 bg-blue-50 rounded-lg shadow-md flex items-center justify-center">
+          <div className="text-center">
+            <FileIcon className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+            <p className="text-xs text-blue-600 font-medium">Text</p>
+          </div>
+        </div>
+      );
+    }
+  };
+
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
@@ -58,8 +129,8 @@ export const NewClaimPage: React.FC = () => {
 
     for (const file of files) {
       // Validate file type
-      if (!file.type.startsWith('image/')) {
-        setError(`${file.name} is not an image file`);
+      if (!isSupportedFileType(file)) {
+        setError(`${file.name} is not a supported file type (images, PDF, or text)`);
         hasError = true;
         break;
       }
@@ -74,7 +145,17 @@ export const NewClaimPage: React.FC = () => {
       // Create preview
       const reader = new FileReader();
       reader.onload = (e) => {
-        const preview = e.target?.result as string;
+        let preview: string;
+
+        // For image files, use the data URL directly
+        if (file.type.startsWith('image/')) {
+          preview = e.target?.result as string;
+        }
+        // For PDF and text files, create a text preview
+        else {
+          preview = `file://${file.name}`; // Placeholder for non-image files
+        }
+
         validFiles.push({ file, preview });
 
         // Update state when all previews are loaded
@@ -82,7 +163,13 @@ export const NewClaimPage: React.FC = () => {
           setSelectedFiles((prev) => [...prev, ...validFiles]);
         }
       };
-      reader.readAsDataURL(file);
+
+      // Read differently based on file type
+      if (file.type.startsWith('image/')) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsDataURL(file); // Still use DataURL for consistency
+      }
     }
 
     if (!hasError) {
@@ -255,15 +342,11 @@ export const NewClaimPage: React.FC = () => {
           >
             {selectedFiles.length > 0 ? (
               <div className="space-y-6">
-                {/* Image Previews */}
+                {/* File Previews */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {selectedFiles.map((sf, idx) => (
                     <div key={idx} className="relative group">
-                      <img
-                        src={sf.preview}
-                        alt={`Preview ${idx + 1}`}
-                        className="w-full h-40 object-cover rounded-lg shadow-md"
-                      />
+                      {renderFilePreview(sf)}
                       <button
                         onClick={() => removeFile(idx)}
                         className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
@@ -277,15 +360,15 @@ export const NewClaimPage: React.FC = () => {
 
                 <div className="flex items-center justify-center gap-2 text-sm text-gray-600">
                   <FileImage className="w-4 h-4" />
-                  {selectedFiles.length} image{selectedFiles.length > 1 ? 's' : ''} selected
+                  {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected
                 </div>
 
                 <div className="flex gap-3 justify-center">
                   <label className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
-                    Add More Images
+                    Add More Files
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/*,.pdf,.txt,.csv"
                       multiple
                       onChange={handleFileSelect}
                       className="hidden"
@@ -295,7 +378,7 @@ export const NewClaimPage: React.FC = () => {
                     onClick={handleUploadAndProcess}
                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                   >
-                    Process {selectedFiles.length} Image{selectedFiles.length > 1 ? 's' : ''}
+                    Process {selectedFiles.length} File{selectedFiles.length > 1 ? 's' : ''}
                   </button>
                 </div>
               </div>
@@ -304,23 +387,24 @@ export const NewClaimPage: React.FC = () => {
                 <Upload className="w-12 h-12 text-gray-400 mx-auto" />
                 <div>
                   <p className="text-gray-600 mb-2">
-                    Drag and drop images here, or click to select
+                    Drag and drop files here, or click to select
                   </p>
                   <p className="text-sm text-gray-500 mb-4">
-                    You can upload multiple images (invoice, doctor's summary, medicine list, etc.)
+                    Upload images, PDF, or text files (invoice, doctor's summary, medicine list, receipts, etc.)
                   </p>
                   <label className="inline-block px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer">
                     Choose Files
                     <input
+                      ref={fileInputRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/*,.pdf,.txt,.csv"
                       multiple
                       onChange={handleFileSelect}
                       className="hidden"
                     />
                   </label>
                 </div>
-                <p className="text-xs text-gray-500">Supports JPG, PNG (max 10MB per file)</p>
+                <p className="text-xs text-gray-500">Supports images, PDF, and text files (max 10MB per file)</p>
               </div>
             )}
           </div>
