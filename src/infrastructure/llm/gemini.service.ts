@@ -12,39 +12,67 @@ import {
 import { z } from 'zod';
 
 /**
- * Schema for receipt data extraction
+ * Schema for receipt data extraction with lenient defaults
  */
-const receiptDataSchema = z.object({
-  retailerName: z.string().min(1, 'Retailer name is required'),
-  serviceDescription: z.string().min(1, 'Service description is required'),
-  receiptDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format'),
-  totalAmount: z.number().positive('Total amount must be positive'),
-  currency: z.string().default('USD'),
-  invoiceNumber: z.string().optional(),
-  receiptNumber: z.string().optional(),
-  policyNumber: z.string().optional(),
-  paymentMethod: z.nativeEnum(PaymentMethod),
-  lineItems: z
-    .array(
-      z.object({
-        description: z.string(),
-        amount: z.number().positive(),
-        quantity: z.number().optional(),
-      })
-    )
-    .min(1, 'At least one line item is required'),
-  extractionConfidence: z.number().min(0).max(100),
-  // Medical-specific fields
-  doctorName: z.string().optional(),
-  doctorTitle: z.string().optional(),
-  clinicAddress: z.string().optional(),
-  visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  medicalIssues: z.array(z.string()).optional(),
-  prescriptions: z.array(z.string()).optional(),
-  recommendations: z.string().optional(),
-  claimType: z.string().optional(),
-  attachmentDescriptions: z.array(z.string()).optional(),
-});
+const receiptDataSchema = z
+  .object({
+    retailerName: z.string().min(1).optional(),
+    serviceDescription: z.string().min(1).optional(),
+    receiptDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    totalAmount: z.number().positive().optional(),
+    currency: z.string().default('USD'),
+    invoiceNumber: z.string().optional(),
+    receiptNumber: z.string().optional(),
+    policyNumber: z.string().optional(),
+    paymentMethod: z.nativeEnum(PaymentMethod).optional(),
+    lineItems: z
+      .array(
+        z.object({
+          description: z.string(),
+          amount: z.number(),
+          quantity: z.number().optional(),
+        })
+      )
+      .optional(),
+    extractionConfidence: z.number().min(0).max(100).optional(),
+    // Medical-specific fields
+    doctorName: z.string().optional(),
+    doctorTitle: z.string().optional(),
+    clinicAddress: z.string().optional(),
+    visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    medicalIssues: z.array(z.string()).optional(),
+    prescriptions: z.array(z.string()).optional(),
+    recommendations: z.string().optional(),
+    claimType: z.string().optional(),
+    attachmentDescriptions: z.array(z.string()).optional(),
+  })
+  .transform((data) => {
+    // Provide sensible defaults for required fields
+    return {
+      retailerName: data.retailerName || 'Unknown Provider',
+      serviceDescription: data.serviceDescription || 'Medical/Healthcare Service',
+      receiptDate: data.receiptDate || new Date().toISOString().split('T')[0],
+      totalAmount: data.totalAmount || 0,
+      currency: data.currency || 'USD',
+      invoiceNumber: data.invoiceNumber || undefined,
+      receiptNumber: data.receiptNumber || undefined,
+      policyNumber: data.policyNumber || undefined,
+      paymentMethod: data.paymentMethod || PaymentMethod.OTHER,
+      lineItems: data.lineItems && data.lineItems.length > 0
+        ? data.lineItems
+        : [{ description: 'Medical/Healthcare Service', amount: data.totalAmount || 0 }],
+      extractionConfidence: data.extractionConfidence || 50,
+      doctorName: data.doctorName,
+      doctorTitle: data.doctorTitle,
+      clinicAddress: data.clinicAddress,
+      visitDate: data.visitDate,
+      medicalIssues: data.medicalIssues,
+      prescriptions: data.prescriptions,
+      recommendations: data.recommendations,
+      claimType: data.claimType || 'Medical Consultation',
+      attachmentDescriptions: data.attachmentDescriptions,
+    };
+  });
 
 /**
  * Gemini LLM service for receipt processing
@@ -104,8 +132,9 @@ export class GeminiService {
       };
     } catch (error) {
       if (error instanceof z.ZodError) {
+        console.error('Gemini OCR Response Validation Error:', error.errors);
         throw new LLMProcessingError(
-          `Receipt data validation failed: ${error.errors.map((e) => e.message).join(', ')}`
+          `Receipt data validation failed: ${error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')}`
         );
       }
       throw new LLMProcessingError(
@@ -251,45 +280,35 @@ IMPORTANT INSTRUCTIONS:
 - Combine information from ALL documents - don't ignore any image
 - If information appears in multiple documents, use the most complete/accurate version
 - For lineItems, include ALL items from ALL receipts/invoices
+- IMPORTANT: It's okay to omit fields if you cannot extract them - return only the fields you can confidently extract
+- If you cannot determine a value, it's better to omit the field entirely than to guess
 - Return ONLY valid JSON with no additional text before or after
+- The system will provide sensible defaults for any missing fields
 
-Example format:
+Example format (you can omit fields you cannot extract):
 {
   "retailerName": "City Medical Center",
   "serviceDescription": "Medical consultation and treatment",
   "receiptDate": "2025-01-15",
   "totalAmount": 350.00,
-  "currency": "USD",
-  "invoiceNumber": "INV-2025-001",
-  "policyNumber": "POL123456",
   "paymentMethod": "CREDIT_CARD",
   "lineItems": [
     {
-      "description": "Medical consultation - Dr. Smith",
-      "amount": 150.00,
-      "quantity": 1
+      "description": "Medical consultation",
+      "amount": 200.00
     },
     {
       "description": "Blood test",
-      "amount": 100.00,
-      "quantity": 1
-    },
-    {
-      "description": "Medication - Amoxicillin 500mg",
-      "amount": 100.00,
-      "quantity": 1
+      "amount": 150.00
     }
   ],
-  "extractionConfidence": 92,
-  "doctorName": "Dr. John Smith",
-  "doctorTitle": "General Practitioner",
-  "clinicAddress": "123 Medical Street, City, State 12345",
-  "visitDate": "2025-01-15",
-  "medicalIssues": ["Respiratory infection", "Cough"],
-  "prescriptions": ["Amoxicillin 500mg - 3 times daily for 7 days", "Rest and hydration"],
-  "recommendations": "Follow-up visit in 1 week if symptoms persist",
-  "claimType": "Medical Consultation",
-  "attachmentDescriptions": ["Medical invoice", "Doctor's summary", "Prescription"]
+  "extractionConfidence": 85
+}
+
+Minimal example (only required info):
+{
+  "retailerName": "Medical Clinic",
+  "totalAmount": 100.00
 }`;
   }
 
