@@ -38,6 +38,27 @@ export class ClaimProcessorService {
   ) {}
 
   /**
+   * Remove undefined values from an object (Firestore doesn't support undefined)
+   */
+  private cleanUndefined(obj: any): any {
+    if (obj === null || obj === undefined) return null;
+    if (Array.isArray(obj)) {
+      return obj.map((item) => this.cleanUndefined(item));
+    }
+    if (typeof obj === 'object') {
+      const cleaned: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        const cleanedValue = this.cleanUndefined(value);
+        if (cleanedValue !== undefined) {
+          cleaned[key] = cleanedValue;
+        }
+      }
+      return cleaned;
+    }
+    return obj;
+  }
+
+  /**
    * Process receipt images and create draft claim
    */
   async processReceipt(
@@ -59,11 +80,14 @@ export class ClaimProcessorService {
     const docRef = doc(db, 'claims', claimId);
 
     const timestamp = now();
+    // Remove undefined values before storing (Firestore doesn't support undefined)
+    const cleanedExtractedData = this.cleanUndefined(extractedData);
+
     await setDoc(docRef, {
       appUserId,
       personId: null,
       policyId: null,
-      extractedData,
+      extractedData: cleanedExtractedData,
       emailDraft: null,
       status: ClaimStatus.DRAFT,
       isOneClickEligible: false,
