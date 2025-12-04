@@ -56,9 +56,16 @@ export const NewClaimPage: React.FC = () => {
 
   // Listen for file picker trigger from dashboard
   useEffect(() => {
-    if (shouldOpenFilePicker && fileInputRef.current) {
-      fileInputRef.current.click();
+    if (shouldOpenFilePicker) {
+      // Reset the flag immediately to prevent double-triggering
       setShouldOpenFilePicker(false);
+      // Then open the file picker
+      if (fileInputRef.current) {
+        // Use setTimeout to ensure the flag is reset before clicking
+        setTimeout(() => {
+          fileInputRef.current?.click();
+        }, 0);
+      }
     }
   }, [shouldOpenFilePicker, setShouldOpenFilePicker]);
 
