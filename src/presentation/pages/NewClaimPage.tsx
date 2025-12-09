@@ -54,6 +54,7 @@ export const NewClaimPage: React.FC = () => {
   // Generated email
   const [emailSubject, setEmailSubject] = useState<string>('');
   const [emailBody, setEmailBody] = useState<string>('');
+  const [regenerateDescription, setRegenerateDescription] = useState<string>('');
 
   // Sending email state
   const [isSendingEmail, setIsSendingEmail] = useState<boolean>(false);
@@ -429,6 +430,62 @@ export const NewClaimPage: React.FC = () => {
     }
   };
 
+  const handleRegenerateEmail = async () => {
+    if (!claimId || !user) {
+      setError('Missing claim ID');
+      return;
+    }
+
+    try {
+      setStage('generating');
+      setError(null);
+
+      // Update claim with new person and policy if changed
+      if (selectedPersonId && selectedPolicyId) {
+        await container.claimProcessorService.updateClaim(claimId, user.uid, {
+          personId: selectedPersonId,
+          policyId: selectedPolicyId,
+        });
+      }
+
+      // Regenerate email draft (with optional description for refinement)
+      let subject, body;
+      if (regenerateDescription) {
+        // Use refineDraft if description is provided
+        const refined = await container.claimGeneratorService.refineDraft(
+          claimId,
+          regenerateDescription
+        );
+        subject = refined.subject;
+        body = refined.body;
+      } else {
+        // Otherwise regenerate from scratch
+        const generated = await container.claimGeneratorService.generateEmailDraft(claimId);
+        subject = generated.subject;
+        body = generated.body;
+      }
+
+      setEmailSubject(subject);
+      setEmailBody(body);
+      setRegenerateDescription(''); // Clear description after use
+
+      // Update insurer and person details if changed
+      const selectedPolicy = policies.find((p) => p.policyId === selectedPolicyId);
+      if (selectedPolicy) {
+        const insurerData = await container.insurerRepository.findById(selectedPolicy.insurerId);
+        const personData = await container.insuredPersonRepository.findById(selectedPersonId);
+        setInsurer(insurerData);
+        setInsuredPerson(personData);
+      }
+
+      setStage('complete');
+    } catch (err) {
+      console.error('Failed to regenerate email:', err);
+      setError((err as Error).message || 'Failed to regenerate email');
+      setStage('complete'); // Stay on complete stage
+    }
+  };
+
   const handleSendEmail = async () => {
     if (!claimId || !insurer || !insuredPerson) {
       setSendEmailError('Missing required information for sending email');
@@ -785,9 +842,79 @@ export const NewClaimPage: React.FC = () => {
             </div>
           )}
 
+          {/* Person/Policy Selection for Regeneration */}
+          {!sendEmailSuccess && (
+            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+              <h4 className="font-medium text-gray-900 mb-2">Change Person or Policy</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Insured Person
+                  </label>
+                  <select
+                    value={selectedPersonId}
+                    onChange={async (e) => {
+                      setSelectedPersonId(e.target.value);
+                      if (e.target.value) {
+                        const policiesList = await container.policyRepository.findByPersonId(e.target.value);
+                        setPolicies(policiesList);
+                        if (policiesList.length > 0) {
+                          const defaultPolicy = policiesList.find(p => p.isDefault);
+                          setSelectedPolicyId(defaultPolicy ? defaultPolicy.policyId : policiesList[0].policyId);
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  >
+                    {persons.map((person) => (
+                      <option key={person.personId} value={person.personId}>
+                        {person.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Policy
+                  </label>
+                  <select
+                    value={selectedPolicyId}
+                    onChange={(e) => setSelectedPolicyId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  >
+                    {policies.map((policy) => (
+                      <option key={policy.policyId} value={policy.policyId}>
+                        {policy.policyNumber} {policy.isDefault && '(Default)'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Additional Context (Optional)
+                </label>
+                <textarea
+                  value={regenerateDescription}
+                  onChange={(e) => setRegenerateDescription(e.target.value)}
+                  placeholder="Add any specific instructions or context for regenerating the email..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  rows={2}
+                />
+              </div>
+              <button
+                onClick={handleRegenerateEmail}
+                className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 flex items-center justify-center gap-2"
+              >
+                <FileText className="w-4 h-4" />
+                Regenerate Email
+              </button>
+            </div>
+          )}
+
           {/* Email Preview */}
           <div>
-            <h4 className="font-medium text-gray-900 mb-3">Email Preview</h4>
+            <h4 className="font-medium text-gray-900 mb-3">Email Preview (Editable)</h4>
             <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-500">Recipient:</label>
@@ -796,14 +923,24 @@ export const NewClaimPage: React.FC = () => {
                 </p>
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500">Subject:</label>
-                <p className="text-sm text-gray-900 mt-1">{emailSubject}</p>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Subject:</label>
+                <input
+                  type="text"
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  disabled={sendEmailSuccess}
+                />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500">Body:</label>
-                <p className="text-sm text-gray-900 mt-1 whitespace-pre-wrap line-clamp-10">
-                  {emailBody}
-                </p>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Body:</label>
+                <textarea
+                  value={emailBody}
+                  onChange={(e) => setEmailBody(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  rows={10}
+                  disabled={sendEmailSuccess}
+                />
               </div>
               {claimAttachments.length > 0 && (
                 <div>
