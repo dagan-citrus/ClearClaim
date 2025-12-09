@@ -125,7 +125,8 @@ export interface ExtractedReceiptData {
 export interface ClaimAttachment {
   fileName: string;
   mimeType: string;
-  base64Data: string; // Base64 encoded file data
+  storageUrl?: string; // Firebase Storage download URL
+  base64Data?: string; // Base64 encoded file data (deprecated, kept for backwards compatibility)
 }
 
 /**

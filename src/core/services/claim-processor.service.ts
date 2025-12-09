@@ -21,6 +21,7 @@ import {
   InsurerRepository,
 } from '@core/repositories';
 import { GeminiService } from '@infrastructure/llm';
+import { StorageService } from '@infrastructure/storage';
 import { generateUUID, now } from '@core/utils';
 import { SubscriptionService } from './subscription.service';
 
@@ -34,7 +35,8 @@ export class ClaimProcessorService {
     private policyRepository: PolicyRepository,
     private insurerRepository: InsurerRepository,
     private geminiService: GeminiService,
-    private subscriptionService: SubscriptionService
+    private subscriptionService: SubscriptionService,
+    private storageService: StorageService
   ) {}
 
   /**
@@ -98,15 +100,26 @@ export class ClaimProcessorService {
       updatedAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
     });
 
-    // Store attachments in subcollection to avoid Firestore nested entity limits
+    // Upload images to Firebase Storage and store URLs in subcollection
     const attachmentsRef = collection(db, 'claims', claimId, 'attachments');
     for (let i = 0; i < dto.images.length; i++) {
       const img = dto.images[i];
+      const fileName = img.description || `receipt_${i}.jpg`;
+      const mimeType = img.type || 'image/jpeg';
+
+      // Upload to Storage and get download URL
+      const storageUrl = await this.storageService.uploadClaimAttachment(
+        claimId,
+        fileName,
+        img.data || '',
+        mimeType
+      );
+
       const attachmentDoc = doc(attachmentsRef, `attachment_${i}`);
       await setDoc(attachmentDoc, {
-        fileName: img.description || `receipt_${i}.jpg`,
-        mimeType: img.type || 'image/jpeg',
-        base64Data: img.data || '',
+        fileName,
+        mimeType,
+        storageUrl,
         order: i,
         createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
       });

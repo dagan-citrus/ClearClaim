@@ -7,6 +7,7 @@ import { SubscriptionService, ClaimProcessorService, ClaimGeneratorService, OneC
 import { AuthService } from '@infrastructure/auth';
 import { GeminiService } from '@infrastructure/llm';
 import { EmailService } from '@infrastructure/email';
+import { StorageService } from '@infrastructure/storage';
 
 /**
  * Service container class
@@ -23,6 +24,7 @@ class ServiceContainer {
   private _authService?: AuthService;
   private _geminiService?: GeminiService;
   private _emailService?: EmailService;
+  private _storageService?: StorageService;
 
   // Business services
   private _subscriptionService?: SubscriptionService;
@@ -88,6 +90,13 @@ class ServiceContainer {
     return this._emailService;
   }
 
+  get storageService(): StorageService {
+    if (!this._storageService) {
+      this._storageService = new StorageService();
+    }
+    return this._storageService;
+  }
+
   // Business services
   get subscriptionService(): SubscriptionService {
     if (!this._subscriptionService) {
@@ -108,7 +117,8 @@ class ServiceContainer {
         this.policyRepository,
         this.insurerRepository,
         this.geminiService,
-        this.subscriptionService
+        this.subscriptionService,
+        this.storageService
       );
     }
     return this._claimProcessorService;
@@ -149,6 +159,7 @@ class ServiceContainer {
     this._authService = undefined;
     this._geminiService = undefined;
     this._emailService = undefined;
+    this._storageService = undefined;
     this._subscriptionService = undefined;
     this._claimProcessorService = undefined;
     this._claimGeneratorService = undefined;

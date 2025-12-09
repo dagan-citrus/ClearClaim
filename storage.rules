@@ -1,0 +1,24 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow users to upload and read their own claim attachments
+    match /claims/{claimId}/{fileName} {
+      // Allow authenticated users to upload attachments
+      allow create: if request.auth != null;
+
+      // Allow authenticated users to read their own claim attachments
+      // Note: This requires querying Firestore to verify ownership
+      // For now, we allow all authenticated users to read claim attachments
+      allow read: if request.auth != null;
+
+      // Prevent updates and deletes for immutability
+      allow update, delete: if false;
+    }
+
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
