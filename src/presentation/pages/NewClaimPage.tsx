@@ -262,12 +262,22 @@ export const NewClaimPage: React.FC = () => {
 
       // Store base64 data in memory for email attachments
       const base64Map: { [fileName: string]: string } = {};
+      const attachmentsList: ClaimAttachment[] = [];
+
       images.forEach((img) => {
         if (img.description && img.data) {
           base64Map[img.description] = img.data;
+          attachmentsList.push({
+            fileName: img.description,
+            mimeType: img.type || 'image/jpeg',
+            storageUrl: undefined, // Will be set in Firestore, not needed in memory
+            base64Data: img.data,
+          });
         }
       });
+
       setAttachmentBase64Data(base64Map);
+      setClaimAttachments(attachmentsList);
 
       // Load persons for selection
       const personsList = await container.insuredPersonRepository.findByUserId(user.uid);
@@ -347,11 +357,8 @@ export const NewClaimPage: React.FC = () => {
     setEmailSubject(subject);
     setEmailBody(body);
 
-    // Load claim attachments
-    const claim = await container.claimRepository.findById(claimId);
-    if (claim && claim.attachments) {
-      setClaimAttachments(claim.attachments);
-    }
+    // Note: We already have attachments in memory with base64 data
+    // Don't reload from Firestore as they won't have base64 data
 
     // Load insurer and person details for email sending
     const selectedPolicy = policiesList.find((p) => p.policyId === policyId);
@@ -443,6 +450,9 @@ export const NewClaimPage: React.FC = () => {
       );
 
       // Prepare attachments for SendGrid using base64 data from memory
+      console.log('Claim attachments:', claimAttachments);
+      console.log('Base64 data available:', Object.keys(attachmentBase64Data));
+
       const attachments = claimAttachments
         .filter((att) => attachmentBase64Data[att.fileName]) // Only include if we have base64 data
         .map((att) => ({
@@ -451,6 +461,8 @@ export const NewClaimPage: React.FC = () => {
           type: att.mimeType,
           disposition: 'attachment',
         }));
+
+      console.log('Attachments to send:', attachments.length);
 
       // Send the email - Cloud Function will validate the email address
       const result = await container.emailService.sendClaimEmail({
