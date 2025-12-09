@@ -59,7 +59,7 @@ export class ClaimProcessorService {
   }
 
   /**
-   * Process receipt images and create draft claim
+   * Process receipt images/documents and create draft claim
    */
   async processReceipt(
     appUserId: UUID,
@@ -68,8 +68,40 @@ export class ClaimProcessorService {
     // Enforce subscription limits
     await this.subscriptionService.enforceClaimSubmissionLimit(appUserId);
 
-    // Extract receipt data from all images using Gemini
-    const extractedData = await this.geminiService.extractReceiptData(dto.images);
+    let extractedData: ExtractedReceiptData;
+
+    // Determine processing strategy based on what was uploaded
+    const hasImages = dto.images && dto.images.length > 0;
+    const hasDocuments = dto.documents && dto.documents.length > 0;
+
+    if (hasDocuments && !hasImages) {
+      // Documents only - use text extraction
+      extractedData = await this.geminiService.extractReceiptDataFromDocuments(dto.documents!);
+    } else if (hasImages && !hasDocuments) {
+      // Images only - use OCR
+      extractedData = await this.geminiService.extractReceiptData(dto.images!);
+    } else if (hasImages && hasDocuments) {
+      // Both images and documents - combine results
+      // Process images first (OCR)
+      const imageData = await this.geminiService.extractReceiptData(dto.images!);
+      // Process documents
+      const docData = await this.geminiService.extractReceiptDataFromDocuments(dto.documents!);
+
+      // Merge the results - prefer image data but supplement with document data
+      extractedData = {
+        ...docData,
+        ...imageData,
+        // Combine line items from both sources
+        lineItems: [...(imageData.lineItems || []), ...(docData.lineItems || [])],
+        // Use the higher confidence score
+        extractionConfidence: Math.max(
+          imageData.extractionConfidence || 0,
+          docData.extractionConfidence || 0
+        ),
+      };
+    } else {
+      throw new Error('No images or documents provided for processing');
+    }
 
     // Create draft claim
     const claimId = generateUUID();
@@ -100,16 +132,40 @@ export class ClaimProcessorService {
 
     // Store attachments in subcollection to avoid Firestore nested entity limits
     const attachmentsRef = collection(db, 'claims', claimId, 'attachments');
-    for (let i = 0; i < dto.images.length; i++) {
-      const img = dto.images[i];
-      const attachmentDoc = doc(attachmentsRef, `attachment_${i}`);
-      await setDoc(attachmentDoc, {
-        fileName: img.description || `receipt_${i}.jpg`,
-        mimeType: img.type || 'image/jpeg',
-        base64Data: img.data || '',
-        order: i,
-        createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
-      });
+    let attachmentIndex = 0;
+
+    // Store image attachments
+    if (dto.images) {
+      for (let i = 0; i < dto.images.length; i++) {
+        const img = dto.images[i];
+        const attachmentDoc = doc(attachmentsRef, `attachment_${attachmentIndex}`);
+        await setDoc(attachmentDoc, {
+          fileName: img.description || `image_${i}.jpg`,
+          mimeType: img.type || 'image/jpeg',
+          base64Data: img.data || '',
+          order: attachmentIndex,
+          createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
+        });
+        attachmentIndex++;
+      }
+    }
+
+    // Store document attachments
+    if (dto.documents) {
+      for (let i = 0; i < dto.documents.length; i++) {
+        const doc_item = dto.documents[i];
+        const attachmentDoc = doc(attachmentsRef, `attachment_${attachmentIndex}`);
+        const extension = doc_item.type.includes('pdf') ? 'pdf' :
+                         doc_item.type.includes('word') ? 'docx' : 'txt';
+        await setDoc(attachmentDoc, {
+          fileName: doc_item.description || `document_${i}.${extension}`,
+          mimeType: doc_item.type || 'application/octet-stream',
+          base64Data: doc_item.data || '',
+          order: attachmentIndex,
+          createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
+        });
+        attachmentIndex++;
+      }
     }
 
     return { claimId, extractedData };

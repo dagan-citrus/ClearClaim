@@ -92,10 +92,20 @@ export interface ClaimImageData {
 }
 
 /**
+ * Document data for claim processing
+ */
+export interface ClaimDocumentData {
+  data: string; // Base64 encoded document
+  type: string; // MIME type
+  description?: string; // Optional description (e.g., "Medical Report", "Prescription")
+}
+
+/**
  * DTO for creating a new claim
  */
 export interface CreateClaimDTO {
-  images: ClaimImageData[]; // Array of images (invoice, doctor's summary, medicine list, etc.)
+  images?: ClaimImageData[]; // Array of images (invoice, doctor's summary, medicine list, etc.)
+  documents?: ClaimDocumentData[]; // Array of documents (PDF, DOCX, TXT, etc.)
 }
 
 /**

@@ -97,30 +97,37 @@ export const NewClaimPage: React.FC = () => {
   // Helper to check if file type is supported
   const isSupportedFileType = (file: File): boolean => {
     const imageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    const pdfType = 'application/pdf';
-    const textTypes = ['text/plain', 'text/csv'];
+    const documentTypes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+      'application/msword', // .doc
+      'text/plain',
+      'text/csv',
+      'text/markdown',
+      'text/html',
+      'application/json',
+    ];
+
+    const fileName = file.name.toLowerCase();
+    const fileExtensions = ['.pdf', '.docx', '.doc', '.txt', '.csv', '.md', '.html', '.json'];
 
     return (
       imageTypes.includes(file.type) ||
-      file.type === pdfType ||
-      textTypes.includes(file.type) ||
-      file.name.toLowerCase().endsWith('.pdf') ||
-      file.name.toLowerCase().endsWith('.txt') ||
-      file.name.toLowerCase().endsWith('.csv')
+      documentTypes.includes(file.type) ||
+      fileExtensions.some((ext) => fileName.endsWith(ext))
     );
   };
 
-  // Helper to get file type
-  const getFileType = (file: File): 'image' | 'pdf' | 'text' => {
+  // Helper to get file type category
+  const getFileType = (file: File): 'image' | 'document' => {
     if (file.type.startsWith('image/')) return 'image';
-    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
-      return 'pdf';
-    return 'text';
+    return 'document';
   };
 
   // Helper to render preview based on file type
   const renderFilePreview = (sf: SelectedFile) => {
     const fileType = getFileType(sf.file);
+    const fileName = sf.file.name.toLowerCase();
 
     if (fileType === 'image') {
       return (
@@ -130,25 +137,47 @@ export const NewClaimPage: React.FC = () => {
           className="w-full h-40 object-cover rounded-lg shadow-md"
         />
       );
-    } else if (fileType === 'pdf') {
-      return (
-        <div className="w-full h-40 bg-red-50 rounded-lg shadow-md flex items-center justify-center">
-          <div className="text-center">
-            <FileText className="w-8 h-8 text-red-600 mx-auto mb-2" />
-            <p className="text-xs text-red-600 font-medium">PDF</p>
-          </div>
-        </div>
-      );
-    } else {
-      return (
-        <div className="w-full h-40 bg-blue-50 rounded-lg shadow-md flex items-center justify-center">
-          <div className="text-center">
-            <FileIcon className="w-8 h-8 text-blue-600 mx-auto mb-2" />
-            <p className="text-xs text-blue-600 font-medium">Text</p>
-          </div>
-        </div>
-      );
     }
+
+    // Document preview with appropriate icons and colors
+    let iconColor = 'text-blue-600';
+    let bgColor = 'bg-blue-50';
+    let fileLabel = 'Document';
+
+    if (fileName.endsWith('.pdf')) {
+      iconColor = 'text-red-600';
+      bgColor = 'bg-red-50';
+      fileLabel = 'PDF';
+    } else if (fileName.endsWith('.docx') || fileName.endsWith('.doc')) {
+      iconColor = 'text-blue-600';
+      bgColor = 'bg-blue-50';
+      fileLabel = 'Word';
+    } else if (fileName.endsWith('.txt')) {
+      iconColor = 'text-gray-600';
+      bgColor = 'bg-gray-50';
+      fileLabel = 'Text';
+    } else if (fileName.endsWith('.md')) {
+      iconColor = 'text-purple-600';
+      bgColor = 'bg-purple-50';
+      fileLabel = 'Markdown';
+    } else if (fileName.endsWith('.html')) {
+      iconColor = 'text-orange-600';
+      bgColor = 'bg-orange-50';
+      fileLabel = 'HTML';
+    } else if (fileName.endsWith('.json')) {
+      iconColor = 'text-green-600';
+      bgColor = 'bg-green-50';
+      fileLabel = 'JSON';
+    }
+
+    return (
+      <div className={`w-full h-40 ${bgColor} rounded-lg shadow-md flex items-center justify-center`}>
+        <div className="text-center">
+          <FileText className={`w-8 h-8 ${iconColor} mx-auto mb-2`} />
+          <p className={`text-xs ${iconColor} font-medium`}>{fileLabel}</p>
+        </div>
+      </div>
+    );
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -162,7 +191,7 @@ export const NewClaimPage: React.FC = () => {
     for (const file of files) {
       // Validate file type
       if (!isSupportedFileType(file)) {
-        setError(`${file.name} is not a supported file type (images, PDF, or text)`);
+        setError(`${file.name} is not a supported file type. Supported: images (JPG, PNG, etc.), PDF, DOCX, TXT, MD, HTML, JSON`);
         hasError = true;
         break;
       }
@@ -240,16 +269,11 @@ export const NewClaimPage: React.FC = () => {
       setStage('processing');
       setError(null);
 
-      // Filter to only image files for Gemini processing
-      const imageFiles = selectedFiles.filter((sf) => sf.file.type.startsWith('image/'));
+      // Separate files by type
+      const imageFiles = selectedFiles.filter((sf) => getFileType(sf.file) === 'image');
+      const documentFiles = selectedFiles.filter((sf) => getFileType(sf.file) === 'document');
 
-      if (imageFiles.length === 0) {
-        setError('Please upload at least one image file for receipt extraction. PDF and text files are not yet supported for OCR.');
-        setStage('upload');
-        return;
-      }
-
-      // Convert image files to base64
+      // Convert all files to base64
       const images = await Promise.all(
         imageFiles.map(async (sf) => {
           const base64 = await fileToBase64(sf.file);
@@ -261,9 +285,21 @@ export const NewClaimPage: React.FC = () => {
         })
       );
 
-      // Process receipt with image files only
+      const documents = await Promise.all(
+        documentFiles.map(async (sf) => {
+          const base64 = await fileToBase64(sf.file);
+          return {
+            data: base64,
+            type: sf.file.type,
+            description: sf.file.name,
+          };
+        })
+      );
+
+      // Process receipt with both images and documents
       const result = await container.claimProcessorService.processReceipt(user.uid, {
         images,
+        documents,
       });
 
       setClaimId(result.claimId);
@@ -567,7 +603,7 @@ export const NewClaimPage: React.FC = () => {
                     Add More Files
                     <input
                       type="file"
-                      accept="image/*,.pdf,.txt,.csv"
+                      accept="image/*,.pdf,.docx,.doc,.txt,.csv,.md,.html,.json"
                       multiple
                       onChange={handleFileSelect}
                       className="hidden"
@@ -586,24 +622,24 @@ export const NewClaimPage: React.FC = () => {
                 <Upload className="w-12 h-12 text-gray-400 mx-auto" />
                 <div>
                   <p className="text-gray-600 mb-2">
-                    Drag and drop images here, or click to select
+                    Drag and drop files here, or click to select
                   </p>
                   <p className="text-sm text-gray-500 mb-4">
-                    Upload receipt images (JPG, PNG, etc.) for automatic OCR extraction
+                    Upload images (JPG, PNG) or documents (PDF, DOCX, TXT, MD, HTML, JSON)
                   </p>
                   <label className="inline-block px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer">
                     Choose Files
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="image/*,.pdf,.txt,.csv"
+                      accept="image/*,.pdf,.docx,.doc,.txt,.csv,.md,.html,.json"
                       multiple
                       onChange={handleFileSelect}
                       className="hidden"
                     />
                   </label>
                 </div>
-                <p className="text-xs text-gray-500">Upload images for OCR processing (PDF and text support coming soon)</p>
+                <p className="text-xs text-gray-500">Images use OCR extraction, documents use direct text processing</p>
               </div>
             )}
           </div>
