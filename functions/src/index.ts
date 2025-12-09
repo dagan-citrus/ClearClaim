@@ -103,7 +103,15 @@ export const sendClaimEmail = functions.https.onRequest((req, res) => {
 
       // Add attachments if provided
       if (attachments && attachments.length > 0) {
+        console.log(`Adding ${attachments.length} attachments to email`);
+        console.log('Attachment details:', attachments.map(a => ({
+          filename: a.filename,
+          type: a.type,
+          contentLength: a.content?.length || 0
+        })));
         msg.attachments = attachments;
+      } else {
+        console.log('No attachments provided or empty array');
       }
 
       // Send email
