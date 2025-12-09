@@ -58,6 +58,7 @@ export interface InsuredPerson {
 export interface Insurer {
   insurerId: UUID;
   insurerName: string;
+  claimsEmail: string; // Email address for sending claims
   claimsEmailTemplate: string;
   templatePrompt: string; // Optional custom AI instructions (empty = use default template)
   createdAt: Timestamp;
@@ -119,6 +120,15 @@ export interface ExtractedReceiptData {
 }
 
 /**
+ * Attachment file for claims
+ */
+export interface ClaimAttachment {
+  fileName: string;
+  mimeType: string;
+  base64Data: string; // Base64 encoded file data
+}
+
+/**
  * Claim record
  */
 export interface Claim {
@@ -127,6 +137,7 @@ export interface Claim {
   personId: UUID;
   policyId: UUID;
   extractedData: ExtractedReceiptData;
+  attachments: ClaimAttachment[]; // Uploaded images/files
   emailSubject: string | null; // Generated email subject
   emailDraft: string | null; // Generated email body
   status: ClaimStatus;

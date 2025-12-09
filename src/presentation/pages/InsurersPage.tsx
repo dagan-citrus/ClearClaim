@@ -6,16 +6,18 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@presentation/contexts/AuthContext';
 import { container } from '@core/container';
 import { Insurer } from '@core/types';
-import { Plus, Trash2, Building2, X, Mail, MessageSquare } from 'lucide-react';
+import { Plus, Trash2, Building2, X, Mail, MessageSquare, Edit } from 'lucide-react';
 
 export const InsurersPage: React.FC = () => {
   const { user } = useAuth();
   const [insurers, setInsurers] = useState<Insurer[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editingInsurer, setEditingInsurer] = useState<Insurer | null>(null);
 
   const [form, setForm] = useState({
     insurerName: '',
+    claimsEmail: '',
     claimsEmailTemplate: '',
     templatePrompt: '',
   });
@@ -40,22 +42,40 @@ export const InsurersPage: React.FC = () => {
 
   const handleSave = async () => {
     try {
-      const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
-      const { collection, addDoc, Timestamp } = await import('firebase/firestore');
-      const insurersRef = collection(db, 'insurers');
+      if (editingInsurer) {
+        // Update existing insurer
+        await container.insurerRepository.update(editingInsurer.insurerId, form);
+      } else {
+        // Create new insurer
+        const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
+        const { collection, addDoc, Timestamp } = await import('firebase/firestore');
+        const insurersRef = collection(db, 'insurers');
 
-      await addDoc(insurersRef, {
-        ...form,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
+        await addDoc(insurersRef, {
+          ...form,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+      }
 
       setShowForm(false);
-      setForm({ insurerName: '', claimsEmailTemplate: '', templatePrompt: '' });
+      setForm({ insurerName: '', claimsEmail: '', claimsEmailTemplate: '', templatePrompt: '' });
+      setEditingInsurer(null);
       loadInsurers();
     } catch (error) {
       console.error('Failed to save insurer:', error);
     }
+  };
+
+  const handleEdit = (insurer: Insurer) => {
+    setEditingInsurer(insurer);
+    setForm({
+      insurerName: insurer.insurerName,
+      claimsEmail: insurer.claimsEmail,
+      claimsEmailTemplate: insurer.claimsEmailTemplate,
+      templatePrompt: insurer.templatePrompt || '',
+    });
+    setShowForm(true);
   };
 
   const handleDelete = async (insurerId: string) => {
@@ -103,16 +123,24 @@ export const InsurersPage: React.FC = () => {
                   <h3 className="font-semibold text-gray-900 text-lg">{insurer.insurerName}</h3>
                   <div className="flex items-center gap-1 text-sm text-gray-500">
                     <Mail className="w-3 h-3" />
-                    {insurer.claimsEmailTemplate}
+                    {insurer.claimsEmail || insurer.claimsEmailTemplate}
                   </div>
                 </div>
               </div>
-              <button
-                onClick={() => handleDelete(insurer.insurerId)}
-                className="text-red-600 hover:text-red-700"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleEdit(insurer)}
+                  className="text-indigo-600 hover:text-indigo-700"
+                >
+                  <Edit className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleDelete(insurer.insurerId)}
+                  className="text-red-600 hover:text-red-700"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {insurer.templatePrompt && (
@@ -128,13 +156,19 @@ export const InsurersPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Add Insurer Modal */}
+      {/* Add/Edit Insurer Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Add Insurance Company</h3>
-              <button onClick={() => setShowForm(false)}>
+              <h3 className="text-lg font-semibold">
+                {editingInsurer ? 'Edit' : 'Add'} Insurance Company
+              </h3>
+              <button onClick={() => {
+                setShowForm(false);
+                setEditingInsurer(null);
+                setForm({ insurerName: '', claimsEmail: '', claimsEmailTemplate: '', templatePrompt: '' });
+              }}>
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -153,8 +187,8 @@ export const InsurersPage: React.FC = () => {
                 <label className="block text-sm font-medium mb-1">Claims Email Address</label>
                 <input
                   type="email"
-                  value={form.claimsEmailTemplate}
-                  onChange={(e) => setForm({ ...form, claimsEmailTemplate: e.target.value })}
+                  value={form.claimsEmail || form.claimsEmailTemplate}
+                  onChange={(e) => setForm({ ...form, claimsEmail: e.target.value, claimsEmailTemplate: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="claims@insurer.com"
                 />

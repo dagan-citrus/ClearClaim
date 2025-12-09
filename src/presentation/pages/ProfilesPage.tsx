@@ -6,7 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@presentation/contexts/AuthContext';
 import { container } from '@core/container';
 import { InsuredPerson, UserPolicy, Insurer, PolicyType } from '@core/types';
-import { Plus, Trash2, User, FileText, X } from 'lucide-react';
+import { Plus, Trash2, User, FileText, X, Edit } from 'lucide-react';
 
 export const ProfilesPage: React.FC = () => {
   const { user } = useAuth();
@@ -17,6 +17,8 @@ export const ProfilesPage: React.FC = () => {
   const [showPersonForm, setShowPersonForm] = useState(false);
   const [showPolicyForm, setShowPolicyForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editingPerson, setEditingPerson] = useState<InsuredPerson | null>(null);
+  const [editingPolicy, setEditingPolicy] = useState<UserPolicy | null>(null);
 
   // Form states
   const [personForm, setPersonForm] = useState({
@@ -76,45 +78,80 @@ export const ProfilesPage: React.FC = () => {
   const handleSavePerson = async () => {
     if (!user) return;
     try {
-      const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
-      const { collection, addDoc, Timestamp } = await import('firebase/firestore');
-      const personsRef = collection(db, 'insured_persons');
+      if (editingPerson) {
+        // Update existing person
+        await container.insuredPersonRepository.update(editingPerson.personId, personForm);
+      } else {
+        // Create new person
+        const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
+        const { collection, addDoc, Timestamp } = await import('firebase/firestore');
+        const personsRef = collection(db, 'insured_persons');
 
-      await addDoc(personsRef, {
-        appUserId: user.uid,
-        ...personForm,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
+        await addDoc(personsRef, {
+          appUserId: user.uid,
+          ...personForm,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+      }
 
       setShowPersonForm(false);
       setPersonForm({ fullName: '', dateOfBirth: '', primaryId: '' });
+      setEditingPerson(null);
       loadData();
     } catch (error) {
       console.error('Failed to save person:', error);
     }
   };
 
+  const handleEditPerson = (person: InsuredPerson) => {
+    setEditingPerson(person);
+    setPersonForm({
+      fullName: person.fullName,
+      dateOfBirth: person.dateOfBirth,
+      primaryId: person.primaryId,
+    });
+    setShowPersonForm(true);
+  };
+
   const handleSavePolicy = async () => {
     if (!selectedPerson) return;
     try {
-      const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
-      const { collection, addDoc, Timestamp } = await import('firebase/firestore');
-      const policiesRef = collection(db, 'policies');
+      if (editingPolicy) {
+        // Update existing policy
+        await container.policyRepository.update(editingPolicy.policyId, policyForm);
+      } else {
+        // Create new policy
+        const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
+        const { collection, addDoc, Timestamp } = await import('firebase/firestore');
+        const policiesRef = collection(db, 'policies');
 
-      await addDoc(policiesRef, {
-        personId: selectedPerson.personId,
-        ...policyForm,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
+        await addDoc(policiesRef, {
+          personId: selectedPerson.personId,
+          ...policyForm,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+      }
 
       setShowPolicyForm(false);
       setPolicyForm({ insurerId: '', policyType: PolicyType.HEALTH, policyNumber: '', isDefault: false });
+      setEditingPolicy(null);
       loadPolicies(selectedPerson.personId);
     } catch (error) {
       console.error('Failed to save policy:', error);
     }
+  };
+
+  const handleEditPolicy = (policy: UserPolicy) => {
+    setEditingPolicy(policy);
+    setPolicyForm({
+      insurerId: policy.insurerId,
+      policyType: policy.policyType,
+      policyNumber: policy.policyNumber,
+      isDefault: policy.isDefault,
+    });
+    setShowPolicyForm(true);
   };
 
   const handleDeletePerson = async (personId: string) => {
@@ -184,15 +221,26 @@ export const ProfilesPage: React.FC = () => {
                     <p className="text-sm text-gray-500">{person.primaryId}</p>
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeletePerson(person.personId);
-                  }}
-                  className="text-red-600 hover:text-red-700"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditPerson(person);
+                    }}
+                    className="text-indigo-600 hover:text-indigo-700"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeletePerson(person.personId);
+                    }}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -204,7 +252,16 @@ export const ProfilesPage: React.FC = () => {
             <>
               {/* Person Details */}
               <div className="bg-white rounded-lg border border-gray-200 p-6">
-                <h3 className="font-semibold text-gray-900 mb-4">Profile Details</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-semibold text-gray-900">Profile Details</h3>
+                  <button
+                    onClick={() => handleEditPerson(selectedPerson)}
+                    className="flex items-center gap-2 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                  >
+                    <Edit className="w-3 h-3" />
+                    Edit
+                  </button>
+                </div>
                 <dl className="grid grid-cols-2 gap-4">
                   <div>
                     <dt className="text-sm text-gray-500">Full Name</dt>
@@ -259,12 +316,20 @@ export const ProfilesPage: React.FC = () => {
                               )}
                             </div>
                           </div>
-                          <button
-                            onClick={() => handleDeletePolicy(policy.policyId)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleEditPolicy(policy)}
+                              className="text-indigo-600 hover:text-indigo-700"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePolicy(policy.policyId)}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -286,13 +351,19 @@ export const ProfilesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Add Person Modal */}
+      {/* Add/Edit Person Modal */}
       {showPersonForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Add Insured Profile</h3>
-              <button onClick={() => setShowPersonForm(false)}>
+              <h3 className="text-lg font-semibold">
+                {editingPerson ? 'Edit' : 'Add'} Insured Profile
+              </h3>
+              <button onClick={() => {
+                setShowPersonForm(false);
+                setEditingPerson(null);
+                setPersonForm({ fullName: '', dateOfBirth: '', primaryId: '' });
+              }}>
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -343,13 +414,19 @@ export const ProfilesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Add Policy Modal */}
+      {/* Add/Edit Policy Modal */}
       {showPolicyForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Add Insurance Policy</h3>
-              <button onClick={() => setShowPolicyForm(false)}>
+              <h3 className="text-lg font-semibold">
+                {editingPolicy ? 'Edit' : 'Add'} Insurance Policy
+              </h3>
+              <button onClick={() => {
+                setShowPolicyForm(false);
+                setEditingPolicy(null);
+                setPolicyForm({ insurerId: '', policyType: PolicyType.HEALTH, policyNumber: '', isDefault: false });
+              }}>
                 <X className="w-5 h-5" />
               </button>
             </div>

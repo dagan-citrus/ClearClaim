@@ -42,7 +42,7 @@ const receiptDataSchema = z
     visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     medicalIssues: z.array(z.string()).optional(),
     prescriptions: z.array(z.string()).optional(),
-    recommendations: z.string().optional(),
+    recommendations: z.union([z.string(), z.array(z.string())]).optional(),
     claimType: z.string().optional(),
     attachmentDescriptions: z.array(z.string()).optional(),
   })
@@ -68,7 +68,12 @@ const receiptDataSchema = z
       visitDate: data.visitDate,
       medicalIssues: data.medicalIssues,
       prescriptions: data.prescriptions,
-      recommendations: data.recommendations,
+      recommendations:
+        typeof data.recommendations === 'string'
+          ? data.recommendations
+          : Array.isArray(data.recommendations)
+            ? data.recommendations.join(', ')
+            : undefined,
       claimType: data.claimType || 'Medical Consultation',
       attachmentDescriptions: data.attachmentDescriptions,
     };

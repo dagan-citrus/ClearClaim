@@ -32,6 +32,7 @@ export interface UpdateInsuredPersonDTO {
  */
 export interface CreateInsurerDTO {
   insurerName: string;
+  claimsEmail: string;
   claimsEmailTemplate: string;
   templatePrompt?: string; // Optional custom AI instructions (uses default if not provided)
 }
@@ -41,6 +42,7 @@ export interface CreateInsurerDTO {
  */
 export interface UpdateInsurerDTO {
   insurerName?: string;
+  claimsEmail?: string;
   claimsEmailTemplate?: string;
   templatePrompt?: string;
 }

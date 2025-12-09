@@ -28,7 +28,7 @@ const configSchema = z.object({
   subscription: z.object({
     free: z.object({
       maxInsuredPersons: z.number().positive().default(1),
-      maxClaimsPerMonth: z.number().positive().default(3),
+      maxClaimsPerMonth: z.number().nullable().default(null), // null = unlimited (development mode)
     }),
     paid: z.object({
       maxInsuredPersons: z.number().nullable().default(null), // null = unlimited
@@ -64,7 +64,7 @@ function loadConfig(): AppConfig {
     subscription: {
       free: {
         maxInsuredPersons: Number(import.meta.env.VITE_FREE_MAX_PERSONS) || 1,
-        maxClaimsPerMonth: Number(import.meta.env.VITE_FREE_MAX_CLAIMS) || 3,
+        maxClaimsPerMonth: import.meta.env.VITE_FREE_MAX_CLAIMS ? Number(import.meta.env.VITE_FREE_MAX_CLAIMS) : null, // null = unlimited (development)
       },
       paid: {
         maxInsuredPersons: null,

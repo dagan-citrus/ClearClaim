@@ -76,18 +76,20 @@ export class ClaimProcessorService {
 
     // Store claim with ID
     const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
-    const { doc, setDoc } = await import('firebase/firestore');
+    const { doc, setDoc, collection } = await import('firebase/firestore');
     const docRef = doc(db, 'claims', claimId);
 
     const timestamp = now();
     // Remove undefined values before storing (Firestore doesn't support undefined)
     const cleanedExtractedData = this.cleanUndefined(extractedData);
 
+    // Store claim without attachments first (to avoid nested array size limits)
     await setDoc(docRef, {
       appUserId,
       personId: null,
       policyId: null,
       extractedData: cleanedExtractedData,
+      attachments: [], // Store as empty array, will be populated from subcollection
       emailDraft: null,
       status: ClaimStatus.DRAFT,
       isOneClickEligible: false,
@@ -95,6 +97,20 @@ export class ClaimProcessorService {
       createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
       updatedAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
     });
+
+    // Store attachments in subcollection to avoid Firestore nested entity limits
+    const attachmentsRef = collection(db, 'claims', claimId, 'attachments');
+    for (let i = 0; i < dto.images.length; i++) {
+      const img = dto.images[i];
+      const attachmentDoc = doc(attachmentsRef, `attachment_${i}`);
+      await setDoc(attachmentDoc, {
+        fileName: img.description || `receipt_${i}.jpg`,
+        mimeType: img.type || 'image/jpeg',
+        base64Data: img.data || '',
+        order: i,
+        createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
+      });
+    }
 
     return { claimId, extractedData };
   }

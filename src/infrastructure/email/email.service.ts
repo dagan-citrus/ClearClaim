@@ -6,6 +6,16 @@ import { getFirebaseAuth } from '@infrastructure/database/firebase';
 import { EmailSendingError, UUID } from '@core/types';
 
 /**
+ * Interface for email attachment
+ */
+export interface EmailAttachment {
+  content: string; // Base64 encoded content
+  filename: string;
+  type: string; // MIME type
+  disposition: string;
+}
+
+/**
  * Interface for email sending request
  */
 export interface SendEmailRequest {
@@ -14,6 +24,7 @@ export interface SendEmailRequest {
   htmlContent: string;
   textContent?: string;
   claimId: UUID;
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -28,6 +39,8 @@ export class EmailService {
    */
   async sendClaimEmail(request: SendEmailRequest): Promise<{ success: boolean; claimId: UUID }> {
     try {
+      console.log('📧 Sending email to:', request.to);
+
       // Get the current user's auth token
       const auth = getFirebaseAuth();
       const currentUser = auth.currentUser;
@@ -38,6 +51,7 @@ export class EmailService {
 
       // Get the ID token
       const idToken = await currentUser.getIdToken();
+      console.log('✅ Got ID token, calling Cloud Function...');
 
       // Call the Cloud Function
       const response = await fetch(EmailService.FUNCTION_URL, {
@@ -49,19 +63,24 @@ export class EmailService {
         body: JSON.stringify(request),
       });
 
+      console.log('📨 Cloud Function response status:', response.status);
+
       if (!response.ok) {
         const error = await response.json();
+        console.error('❌ Cloud Function error:', error);
         throw new EmailSendingError(
           `Failed to send email: ${error.error || response.statusText}`
         );
       }
 
       const data = await response.json();
+      console.log('✅ Email sent successfully:', data);
       return {
         success: true,
         claimId: data.claimId,
       };
     } catch (error) {
+      console.error('❌ Email sending error:', error);
       if (error instanceof EmailSendingError) {
         throw error;
       }

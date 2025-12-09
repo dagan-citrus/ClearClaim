@@ -18,6 +18,8 @@ export class InsurerRepository extends BaseRepository<Insurer> {
     return {
       insurerId: id,
       insurerName: data.insurerName,
+      // Support both claimsEmail and claimsEmailTemplate for backward compatibility
+      claimsEmail: data.claimsEmail || data.claimsEmailTemplate || '',
       claimsEmailTemplate: data.claimsEmailTemplate,
       templatePrompt: data.templatePrompt || '', // Default to empty string for backward compatibility
       createdAt: this.fromFirestoreTimestamp(data.createdAt),
@@ -29,6 +31,7 @@ export class InsurerRepository extends BaseRepository<Insurer> {
     const data: DocumentData = {};
 
     if (entity.insurerName !== undefined) data.insurerName = entity.insurerName;
+    if (entity.claimsEmail !== undefined) data.claimsEmail = entity.claimsEmail;
     if (entity.claimsEmailTemplate !== undefined)
       data.claimsEmailTemplate = entity.claimsEmailTemplate;
     if (entity.templatePrompt !== undefined) data.templatePrompt = entity.templatePrompt;

@@ -54,6 +54,18 @@ export const NewClaimPage: React.FC = () => {
   const [emailSubject, setEmailSubject] = useState<string>('');
   const [emailBody, setEmailBody] = useState<string>('');
 
+  // Sending email state
+  const [isSendingEmail, setIsSendingEmail] = useState<boolean>(false);
+  const [sendEmailError, setSendEmailError] = useState<string | null>(null);
+  const [sendEmailSuccess, setSendEmailSuccess] = useState<boolean>(false);
+
+  // Insurer details for email sending
+  const [insurer, setInsurer] = useState<any>(null);
+  const [insuredPerson, setInsuredPerson] = useState<any>(null);
+
+  // Claim attachments
+  const [claimAttachments, setClaimAttachments] = useState<Array<{fileName: string; mimeType: string; base64Data: string}>>([]);
+
   // Listen for file picker trigger from dashboard
   useEffect(() => {
     if (shouldOpenFilePicker) {
@@ -248,30 +260,96 @@ export const NewClaimPage: React.FC = () => {
       const personsList = await container.insuredPersonRepository.findByUserId(user.uid);
       setPersons(personsList);
 
-      // Check One-Click eligibility
+      // Auto-select person and policy for fully automatic flow
+      let selectedPerson: string | null = null;
+      let selectedPolicy: string | null = null;
+      let policiesList: any[] = [];
+
+      // Check One-Click eligibility first
       const eligibility = await container.claimProcessorService.checkOneClickEligibility(
         user.uid,
         result.extractedData
       );
 
       if (eligibility.isEligible && eligibility.suggestedPersonId && eligibility.suggestedPolicyId) {
-        // Auto-select suggested person and policy
-        setSelectedPersonId(eligibility.suggestedPersonId);
-        setSelectedPolicyId(eligibility.suggestedPolicyId);
+        // Use One-Click suggested person and policy
+        selectedPerson = eligibility.suggestedPersonId;
+        selectedPolicy = eligibility.suggestedPolicyId;
+        policiesList = await container.policyRepository.findByPersonId(selectedPerson);
+      } else if (personsList.length > 0) {
+        // No One-Click match - auto-select first person
+        selectedPerson = personsList[0].personId;
+        policiesList = await container.policyRepository.findByPersonId(selectedPerson);
 
-        // Load policies for the person
-        const policiesList = await container.policyRepository.findByPersonId(
-          eligibility.suggestedPersonId
-        );
-        setPolicies(policiesList);
+        if (policiesList.length > 0) {
+          // Find default policy or use first policy
+          const defaultPolicy = policiesList.find(p => p.isDefault);
+          selectedPolicy = defaultPolicy ? defaultPolicy.policyId : policiesList[0].policyId;
+        }
       }
 
-      setStage('review');
+      // Update state
+      setSelectedPersonId(selectedPerson || '');
+      setSelectedPolicyId(selectedPolicy || '');
+      setPolicies(policiesList);
+
+      // Auto-proceed if we have both person and policy
+      if (selectedPerson && selectedPolicy) {
+        try {
+          await autoProceedToEmail(result.claimId, selectedPerson, selectedPolicy, policiesList);
+        } catch (autoErr) {
+          console.error('Auto-proceed failed, falling back to manual review:', autoErr);
+          setError('Auto-processing encountered an issue. Please review and continue manually.');
+          setStage('review');
+        }
+      } else {
+        // No person or policy found - show review stage
+        setError('Please set up your profile and insurance policy in the settings first.');
+        setStage('review');
+      }
     } catch (err) {
       console.error('Failed to process receipt:', err);
       setError((err as Error).message || 'Failed to process receipt');
       setStage('upload');
     }
+  };
+
+  const autoProceedToEmail = async (
+    claimId: string,
+    personId: string,
+    policyId: string,
+    policiesList: UserPolicy[]
+  ) => {
+    setStage('generating');
+
+    // Update claim with person and policy
+    await container.claimProcessorService.updateClaim(claimId, user!.uid, {
+      personId,
+      policyId,
+    });
+
+    // Generate email draft
+    const { subject, body } = await container.claimGeneratorService.generateEmailDraft(claimId);
+
+    setEmailSubject(subject);
+    setEmailBody(body);
+
+    // Load claim attachments
+    const claim = await container.claimRepository.findById(claimId);
+    if (claim && claim.attachments) {
+      setClaimAttachments(claim.attachments);
+    }
+
+    // Load insurer and person details for email sending
+    const selectedPolicy = policiesList.find((p) => p.policyId === policyId);
+    if (selectedPolicy) {
+      const insurerData = await container.insurerRepository.findById(selectedPolicy.insurerId);
+      const personData = await container.insuredPersonRepository.findById(personId);
+      setInsurer(insurerData);
+      setInsuredPerson(personData);
+    }
+
+    setStage('complete');
   };
 
   const handlePersonChange = async (personId: string) => {
@@ -307,11 +385,76 @@ export const NewClaimPage: React.FC = () => {
 
       setEmailSubject(subject);
       setEmailBody(body);
+
+      // Load claim attachments
+      const claim = await container.claimRepository.findById(claimId);
+      if (claim && claim.attachments) {
+        setClaimAttachments(claim.attachments);
+      }
+
+      // Load insurer and person details for email sending
+      const selectedPolicy = policies.find((p) => p.policyId === selectedPolicyId);
+      if (selectedPolicy) {
+        const insurerData = await container.insurerRepository.findById(selectedPolicy.insurerId);
+        const personData = await container.insuredPersonRepository.findById(selectedPersonId);
+        setInsurer(insurerData);
+        setInsuredPerson(personData);
+      }
+
       setStage('complete');
     } catch (err) {
       console.error('Failed to generate email:', err);
       setError((err as Error).message || 'Failed to generate email');
       setStage('review');
+    }
+  };
+
+  const handleSendEmail = async () => {
+    if (!claimId || !insurer || !insuredPerson) {
+      setSendEmailError('Missing required information for sending email');
+      return;
+    }
+
+    try {
+      setIsSendingEmail(true);
+      setSendEmailError(null);
+      setSendEmailSuccess(false);
+
+      // Format the email HTML
+      const selectedPolicy = policies.find((p) => p.policyId === selectedPolicyId);
+      const htmlContent = container.emailService.formatClaimEmailHTML(
+        insuredPerson.fullName,
+        selectedPolicy?.policyNumber || 'Unknown',
+        insurer.insurerName,
+        emailBody
+      );
+
+      // Prepare attachments for SendGrid
+      const attachments = claimAttachments.map((att) => ({
+        content: att.base64Data,
+        filename: att.fileName,
+        type: att.mimeType,
+        disposition: 'attachment',
+      }));
+
+      // Send the email - Cloud Function will validate the email address
+      const result = await container.emailService.sendClaimEmail({
+        to: insurer.claimsEmail || '',
+        subject: emailSubject,
+        htmlContent,
+        textContent: emailBody,
+        claimId,
+        attachments,
+      });
+
+      if (result.success) {
+        setSendEmailSuccess(true);
+      }
+    } catch (err) {
+      console.error('Failed to send email:', err);
+      setSendEmailError((err as Error).message || 'Failed to send email');
+    } finally {
+      setIsSendingEmail(false);
     }
   };
 
@@ -327,6 +470,11 @@ export const NewClaimPage: React.FC = () => {
     setSelectedPolicyId('');
     setEmailSubject('');
     setEmailBody('');
+    setInsurer(null);
+    setInsuredPerson(null);
+    setIsSendingEmail(false);
+    setSendEmailError(null);
+    setSendEmailSuccess(false);
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -585,21 +733,39 @@ export const NewClaimPage: React.FC = () => {
       {/* Complete Stage */}
       {stage === 'complete' && (
         <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
-          <div className="flex items-start gap-3">
-            <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-1" />
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Claim Created Successfully!</h3>
-              <p className="text-sm text-gray-600">
-                Your email draft has been generated and saved. You can view and edit it in the
-                Claims tab.
-              </p>
+          {sendEmailSuccess ? (
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-1" />
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Email Sent Successfully!</h3>
+                <p className="text-sm text-gray-600">
+                  Your claim has been sent to {insurer?.insurerName}. The claim status has been
+                  updated to submitted.
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-1" />
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Claim Created Successfully!</h3>
+                <p className="text-sm text-gray-600">
+                  Your email draft has been generated. Review it below and send it to the insurer.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Email Preview */}
           <div>
             <h4 className="font-medium text-gray-900 mb-3">Email Preview</h4>
             <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500">Recipient:</label>
+                <p className="text-sm text-gray-900 mt-1">
+                  {insurer?.insurerName || 'Unknown Insurer'} ({insurer?.claimsEmail || 'No email'})
+                </p>
+              </div>
               <div>
                 <label className="text-xs font-medium text-gray-500">Subject:</label>
                 <p className="text-sm text-gray-900 mt-1">{emailSubject}</p>
@@ -610,15 +776,63 @@ export const NewClaimPage: React.FC = () => {
                   {emailBody}
                 </p>
               </div>
+              {claimAttachments.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500">
+                    Attachments ({claimAttachments.length}):
+                  </label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
+                    {claimAttachments.map((attachment, idx) => (
+                      <div key={idx} className="relative group">
+                        {attachment.mimeType.startsWith('image/') ? (
+                          <img
+                            src={`data:${attachment.mimeType};base64,${attachment.base64Data}`}
+                            alt={attachment.fileName}
+                            className="w-full h-24 object-cover rounded border border-gray-300"
+                          />
+                        ) : (
+                          <div className="w-full h-24 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
+                            <FileText className="w-6 h-6 text-gray-500" />
+                          </div>
+                        )}
+                        <p className="text-xs text-gray-600 mt-1 truncate">{attachment.fileName}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
+          {sendEmailError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-800">{sendEmailError}</p>
+            </div>
+          )}
+
           <div className="flex gap-3">
+            {!sendEmailSuccess && (
+              <button
+                onClick={handleSendEmail}
+                disabled={isSendingEmail}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSendingEmail ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Sending Email...
+                  </>
+                ) : (
+                  'Send to Insurer'
+                )}
+              </button>
+            )}
             <button
               onClick={handleReset}
-              className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
             >
-              Create Another Claim
+              {sendEmailSuccess ? 'Create Another Claim' : 'Cancel'}
             </button>
           </div>
         </div>

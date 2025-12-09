@@ -6,6 +6,7 @@ import { UserRepository, InsuredPersonRepository, InsurerRepository, PolicyRepos
 import { SubscriptionService, ClaimProcessorService, ClaimGeneratorService, OneClickClaimService } from './services';
 import { AuthService } from '@infrastructure/auth';
 import { GeminiService } from '@infrastructure/llm';
+import { EmailService } from '@infrastructure/email';
 
 /**
  * Service container class
@@ -21,6 +22,7 @@ class ServiceContainer {
   // Infrastructure services
   private _authService?: AuthService;
   private _geminiService?: GeminiService;
+  private _emailService?: EmailService;
 
   // Business services
   private _subscriptionService?: SubscriptionService;
@@ -77,6 +79,13 @@ class ServiceContainer {
       this._geminiService = new GeminiService();
     }
     return this._geminiService;
+  }
+
+  get emailService(): EmailService {
+    if (!this._emailService) {
+      this._emailService = new EmailService();
+    }
+    return this._emailService;
   }
 
   // Business services
@@ -139,6 +148,7 @@ class ServiceContainer {
     this._claimRepository = undefined;
     this._authService = undefined;
     this._geminiService = undefined;
+    this._emailService = undefined;
     this._subscriptionService = undefined;
     this._claimProcessorService = undefined;
     this._claimGeneratorService = undefined;
