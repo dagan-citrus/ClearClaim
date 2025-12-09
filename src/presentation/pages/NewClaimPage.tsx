@@ -67,6 +67,9 @@ export const NewClaimPage: React.FC = () => {
   // Claim attachments
   const [claimAttachments, setClaimAttachments] = useState<ClaimAttachment[]>([]);
 
+  // Store base64 data in memory (not in Firestore due to 1MB limit)
+  const [attachmentBase64Data, setAttachmentBase64Data] = useState<{ [fileName: string]: string }>({});
+
   // Listen for file picker trigger from dashboard
   useEffect(() => {
     if (shouldOpenFilePicker) {
@@ -257,6 +260,15 @@ export const NewClaimPage: React.FC = () => {
       setClaimId(result.claimId);
       setExtractedData(result.extractedData);
 
+      // Store base64 data in memory for email attachments
+      const base64Map: { [fileName: string]: string } = {};
+      images.forEach((img) => {
+        if (img.description && img.data) {
+          base64Map[img.description] = img.data;
+        }
+      });
+      setAttachmentBase64Data(base64Map);
+
       // Load persons for selection
       const personsList = await container.insuredPersonRepository.findByUserId(user.uid);
       setPersons(personsList);
@@ -430,11 +442,11 @@ export const NewClaimPage: React.FC = () => {
         emailBody
       );
 
-      // Prepare attachments for SendGrid
+      // Prepare attachments for SendGrid using base64 data from memory
       const attachments = claimAttachments
-        .filter((att) => att.base64Data) // Only include attachments with base64 data
+        .filter((att) => attachmentBase64Data[att.fileName]) // Only include if we have base64 data
         .map((att) => ({
-          content: att.base64Data!,
+          content: attachmentBase64Data[att.fileName],
           filename: att.fileName,
           type: att.mimeType,
           disposition: 'attachment',
@@ -475,6 +487,8 @@ export const NewClaimPage: React.FC = () => {
     setEmailBody('');
     setInsurer(null);
     setInsuredPerson(null);
+    setClaimAttachments([]);
+    setAttachmentBase64Data({});
     setIsSendingEmail(false);
     setSendEmailError(null);
     setSendEmailSuccess(false);
