@@ -431,29 +431,14 @@ export const NewClaimPage: React.FC = () => {
       );
 
       // Prepare attachments for SendGrid
-      // Fetch images from Storage URLs and convert to base64
-      const attachments = await Promise.all(
-        claimAttachments.map(async (att) => {
-          let base64Content = att.base64Data || '';
-
-          // If storageUrl exists, fetch the image and convert to base64
-          if (att.storageUrl && !att.base64Data) {
-            try {
-              base64Content = await container.storageService.fetchImageAsBase64(att.storageUrl);
-            } catch (error) {
-              console.error('Failed to fetch attachment from storage:', error);
-              throw new Error(`Failed to fetch attachment ${att.fileName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            }
-          }
-
-          return {
-            content: base64Content,
-            filename: att.fileName,
-            type: att.mimeType,
-            disposition: 'attachment',
-          };
-        })
-      );
+      const attachments = claimAttachments
+        .filter((att) => att.base64Data) // Only include attachments with base64 data
+        .map((att) => ({
+          content: att.base64Data!,
+          filename: att.fileName,
+          type: att.mimeType,
+          disposition: 'attachment',
+        }));
 
       // Send the email - Cloud Function will validate the email address
       const result = await container.emailService.sendClaimEmail({

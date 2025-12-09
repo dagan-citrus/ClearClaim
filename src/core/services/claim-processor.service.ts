@@ -120,6 +120,7 @@ export class ClaimProcessorService {
         fileName,
         mimeType,
         storageUrl,
+        base64Data: img.data || '', // Store base64 for email attachments (each doc can be ~1MB)
         order: i,
         createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
       });
