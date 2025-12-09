@@ -80,6 +80,46 @@ const receiptDataSchema = z
   });
 
 /**
+ * Retry utility with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelay: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`API call attempt ${attempt + 1} failed:`, error);
+
+      // Don't retry if it's a validation error or client error
+      if (error instanceof z.ZodError || error instanceof LLMProcessingError) {
+        throw error;
+      }
+
+      // If this was the last attempt, throw
+      if (attempt === maxRetries - 1) {
+        break;
+      }
+
+      // Wait with exponential backoff
+      const delay = initialDelay * Math.pow(2, attempt);
+      console.log(`Retrying in ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  // All retries failed
+  throw new LLMProcessingError(
+    `API call failed after ${maxRetries} attempts. Please try again later. ${lastError ? `Last error: ${lastError.message}` : ''}`
+  );
+}
+
+/**
  * Gemini LLM service for receipt processing
  */
 export class GeminiService {
@@ -115,9 +155,12 @@ export class GeminiService {
       // Create content array with prompt and all images
       const content = [prompt, ...imageParts];
 
-      const result = await this.model.generateContent(content);
-      const response = await result.response;
-      const text = response.text();
+      // Wrap API call with retry logic
+      const text = await retryWithBackoff(async () => {
+        const result = await this.model.generateContent(content);
+        const response = await result.response;
+        return response.text();
+      });
 
       // Parse JSON response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -169,9 +212,12 @@ export class GeminiService {
         templatePrompt
       );
 
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text().trim();
+      // Wrap API call with retry logic
+      const text = await retryWithBackoff(async () => {
+        const result = await this.model.generateContent(prompt);
+        const response = await result.response;
+        return response.text().trim();
+      });
 
       // Extract subject and body
       const subjectMatch = text.match(/(?:Email )?Subject:\s*(.+?)(?:\n|$)/i);
@@ -217,9 +263,12 @@ Subject: [subject line here]
 
 [email body here]`;
 
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text().trim();
+      // Wrap API call with retry logic
+      const text = await retryWithBackoff(async () => {
+        const result = await this.model.generateContent(prompt);
+        const response = await result.response;
+        return response.text().trim();
+      });
 
       // Extract subject and body
       const subjectMatch = text.match(/Subject:\s*(.+?)(?:\n|$)/i);
@@ -424,6 +473,7 @@ Email Subject: [subject line exactly as shown in template]
    */
   async testConnection(): Promise<boolean> {
     try {
+      // No retry for test connection
       const result = await this.model.generateContent('Hello, can you respond?');
       const response = await result.response;
       return response.text().length > 0;
