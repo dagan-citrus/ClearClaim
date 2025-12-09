@@ -803,7 +803,11 @@ export const NewClaimPage: React.FC = () => {
                       <div key={idx} className="relative group">
                         {attachment.mimeType.startsWith('image/') ? (
                           <img
-                            src={`data:${attachment.mimeType};base64,${attachment.base64Data}`}
+                            src={
+                              attachmentBase64Data[attachment.fileName]
+                                ? `data:${attachment.mimeType};base64,${attachmentBase64Data[attachment.fileName]}`
+                                : attachment.storageUrl || ''
+                            }
                             alt={attachment.fileName}
                             className="w-full h-24 object-cover rounded border border-gray-300"
                           />
