@@ -3,10 +3,11 @@
  */
 
 import { UserRepository, InsuredPersonRepository, InsurerRepository, PolicyRepository, ClaimRepository } from './repositories';
-import { SubscriptionService, ClaimProcessorService, ClaimGeneratorService, OneClickClaimService } from './services';
+import { SubscriptionService, ClaimProcessorService, ClaimGeneratorService, OneClickClaimService, PolicyCoverageService } from './services';
 import { AuthService } from '@infrastructure/auth';
 import { GeminiService } from '@infrastructure/llm';
 import { EmailService } from '@infrastructure/email';
+import { StorageService } from '@infrastructure/storage';
 
 /**
  * Service container class
@@ -23,12 +24,14 @@ class ServiceContainer {
   private _authService?: AuthService;
   private _geminiService?: GeminiService;
   private _emailService?: EmailService;
+  private _storageService?: StorageService;
 
   // Business services
   private _subscriptionService?: SubscriptionService;
   private _claimProcessorService?: ClaimProcessorService;
   private _claimGeneratorService?: ClaimGeneratorService;
   private _oneClickClaimService?: OneClickClaimService;
+  private _policyCoverageService?: PolicyCoverageService;
 
   // Repositories
   get userRepository(): UserRepository {
@@ -88,6 +91,13 @@ class ServiceContainer {
     return this._emailService;
   }
 
+  get storageService(): StorageService {
+    if (!this._storageService) {
+      this._storageService = new StorageService();
+    }
+    return this._storageService;
+  }
+
   // Business services
   get subscriptionService(): SubscriptionService {
     if (!this._subscriptionService) {
@@ -137,6 +147,18 @@ class ServiceContainer {
     return this._oneClickClaimService;
   }
 
+  get policyCoverageService(): PolicyCoverageService {
+    if (!this._policyCoverageService) {
+      this._policyCoverageService = new PolicyCoverageService(
+        this.policyRepository,
+        this.claimRepository,
+        this.geminiService,
+        this.storageService
+      );
+    }
+    return this._policyCoverageService;
+  }
+
   /**
    * Reset all services (useful for testing)
    */
@@ -149,10 +171,12 @@ class ServiceContainer {
     this._authService = undefined;
     this._geminiService = undefined;
     this._emailService = undefined;
+    this._storageService = undefined;
     this._subscriptionService = undefined;
     this._claimProcessorService = undefined;
     this._claimGeneratorService = undefined;
     this._oneClickClaimService = undefined;
+    this._policyCoverageService = undefined;
   }
 }
 

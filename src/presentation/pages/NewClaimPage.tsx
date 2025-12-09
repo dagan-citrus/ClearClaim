@@ -22,6 +22,10 @@ import {
   X,
   FileText,
   FileIcon,
+  Shield,
+  CheckCircle2,
+  XCircle,
+  HelpCircle,
 } from 'lucide-react';
 
 type UploadStage = 'upload' | 'processing' | 'review' | 'generating' | 'complete';
@@ -65,6 +69,15 @@ export const NewClaimPage: React.FC = () => {
 
   // Claim attachments
   const [claimAttachments, setClaimAttachments] = useState<Array<{fileName: string; mimeType: string; base64Data: string}>>([]);
+
+  // Policy coverage test state
+  const [isTestingCoverage, setIsTestingCoverage] = useState<boolean>(false);
+  const [coverageTestResult, setCoverageTestResult] = useState<{
+    status: 'Covered' | 'Not Covered' | 'Not Sure';
+    explanation: string;
+    relevantSections?: string[];
+    confidence?: number;
+  } | null>(null);
 
   // Listen for file picker trigger from dashboard
   useEffect(() => {
@@ -458,6 +471,26 @@ export const NewClaimPage: React.FC = () => {
     }
   };
 
+  const handleTestCoverage = async () => {
+    if (!claimId || !selectedPolicyId) return;
+
+    try {
+      setIsTestingCoverage(true);
+      setCoverageTestResult(null);
+
+      const result = await container.policyCoverageService.testCoverage(claimId, selectedPolicyId);
+      setCoverageTestResult(result);
+    } catch (err) {
+      console.error('Failed to test policy coverage:', err);
+      setCoverageTestResult({
+        status: 'Not Sure',
+        explanation: 'Failed to test policy coverage. Please try again.',
+      });
+    } finally {
+      setIsTestingCoverage(false);
+    }
+  };
+
   const handleReset = () => {
     setStage('upload');
     setSelectedFiles([]);
@@ -475,6 +508,8 @@ export const NewClaimPage: React.FC = () => {
     setIsSendingEmail(false);
     setSendEmailError(null);
     setSendEmailSuccess(false);
+    setCoverageTestResult(null);
+    setIsTestingCoverage(false);
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -803,6 +838,86 @@ export const NewClaimPage: React.FC = () => {
               )}
             </div>
           </div>
+
+          {/* Policy Coverage Test */}
+          {!sendEmailSuccess && (
+            <div className="border-t border-gray-200 pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h4 className="font-medium text-gray-900 flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-indigo-600" />
+                    Test Policy Coverage
+                  </h4>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Verify if this claim is covered by your policy before sending
+                  </p>
+                </div>
+                <button
+                  onClick={handleTestCoverage}
+                  disabled={isTestingCoverage}
+                  className="px-4 py-2 border border-indigo-600 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isTestingCoverage ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="w-4 h-4" />
+                      Test Coverage
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {coverageTestResult && (
+                <div
+                  className={`p-4 rounded-lg border-2 ${
+                    coverageTestResult.status === 'Covered'
+                      ? 'bg-green-50 border-green-300'
+                      : coverageTestResult.status === 'Not Covered'
+                        ? 'bg-red-50 border-red-300'
+                        : 'bg-yellow-50 border-yellow-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    {coverageTestResult.status === 'Covered' ? (
+                      <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
+                    ) : coverageTestResult.status === 'Not Covered' ? (
+                      <XCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <HelpCircle className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <h5 className="font-semibold text-gray-900 mb-1">
+                        {coverageTestResult.status}
+                        {coverageTestResult.confidence !== undefined && (
+                          <span className="ml-2 text-sm font-normal text-gray-600">
+                            (Confidence: {coverageTestResult.confidence}%)
+                          </span>
+                        )}
+                      </h5>
+                      <p className="text-sm text-gray-700 mb-2">{coverageTestResult.explanation}</p>
+                      {coverageTestResult.relevantSections &&
+                        coverageTestResult.relevantSections.length > 0 && (
+                          <div className="mt-2">
+                            <p className="text-xs font-medium text-gray-700 mb-1">
+                              Relevant Policy Sections:
+                            </p>
+                            <ul className="list-disc list-inside text-xs text-gray-600 space-y-1">
+                              {coverageTestResult.relevantSections.map((section, idx) => (
+                                <li key={idx}>{section}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {sendEmailError && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">

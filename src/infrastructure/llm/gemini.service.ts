@@ -420,6 +420,41 @@ Email Subject: [subject line exactly as shown in template]
   }
 
   /**
+   * Analyze policy coverage for a claim
+   */
+  async analyzePolicyCoverage(prompt: string): Promise<{
+    status: 'Covered' | 'Not Covered' | 'Not Sure';
+    explanation: string;
+    relevantSections?: string[];
+    confidence?: number;
+  }> {
+    try {
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      // Parse JSON response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new LLMProcessingError('Failed to extract JSON from policy coverage response');
+      }
+
+      const parsedData = JSON.parse(jsonMatch[0]);
+
+      return {
+        status: parsedData.status || 'Not Sure',
+        explanation: parsedData.explanation || 'Unable to determine coverage',
+        relevantSections: parsedData.relevantSections,
+        confidence: parsedData.confidence,
+      };
+    } catch (error) {
+      throw new LLMProcessingError(
+        `Failed to analyze policy coverage: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
    * Test connection to Gemini API
    */
   async testConnection(): Promise<boolean> {

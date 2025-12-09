@@ -6,7 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@presentation/contexts/AuthContext';
 import { container } from '@core/container';
 import { InsuredPerson, UserPolicy, Insurer, PolicyType } from '@core/types';
-import { Plus, Trash2, User, FileText, X, Edit } from 'lucide-react';
+import { Plus, Trash2, User, FileText, X, Edit, Upload, Link as LinkIcon, Users } from 'lucide-react';
 
 export const ProfilesPage: React.FC = () => {
   const { user } = useAuth();
@@ -32,7 +32,20 @@ export const ProfilesPage: React.FC = () => {
     policyType: PolicyType.HEALTH,
     policyNumber: '',
     isDefault: false,
+    policyDocumentURL: '',
+    policyWebURL: '',
+    sharedFromPersonId: '',
   });
+
+  // Policy document upload state
+  const [policyDocumentFile, setPolicyDocumentFile] = useState<File | null>(null);
+  const [isUploadingDocument, setIsUploadingDocument] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Available policies from other family members for sharing
+  const [availableSharedPolicies, setAvailableSharedPolicies] = useState<
+    Array<{ policy: UserPolicy; person: InsuredPerson; insurer: Insurer }>
+  >([]);
 
   useEffect(() => {
     if (user) {
@@ -45,6 +58,13 @@ export const ProfilesPage: React.FC = () => {
       loadPolicies(selectedPerson.personId);
     }
   }, [selectedPerson]);
+
+  // Load available shared policies when policy form opens
+  useEffect(() => {
+    if (showPolicyForm && selectedPerson) {
+      loadAvailableSharedPolicies();
+    }
+  }, [showPolicyForm, selectedPerson]);
 
   const loadData = async () => {
     if (!user) return;
@@ -72,6 +92,32 @@ export const ProfilesPage: React.FC = () => {
       setPolicies(policiesData);
     } catch (error) {
       console.error('Failed to load policies:', error);
+    }
+  };
+
+  const loadAvailableSharedPolicies = async () => {
+    if (!user || !selectedPerson) return;
+    try {
+      // Get all persons except the current one
+      const otherPersons = persons.filter((p) => p.personId !== selectedPerson.personId);
+
+      // Load policies for each other person
+      const sharedPolicies: Array<{ policy: UserPolicy; person: InsuredPerson; insurer: Insurer }> = [];
+
+      for (const person of otherPersons) {
+        const personPolicies = await container.policyRepository.findByPersonId(person.personId);
+
+        for (const policy of personPolicies) {
+          const insurer = insurers.find((i) => i.insurerId === policy.insurerId);
+          if (insurer) {
+            sharedPolicies.push({ policy, person, insurer });
+          }
+        }
+      }
+
+      setAvailableSharedPolicies(sharedPolicies);
+    } catch (error) {
+      console.error('Failed to load shared policies:', error);
     }
   };
 
@@ -115,11 +161,48 @@ export const ProfilesPage: React.FC = () => {
   };
 
   const handleSavePolicy = async () => {
-    if (!selectedPerson) return;
+    if (!selectedPerson || !user) return;
     try {
+      setUploadError(null);
+      let documentURL = policyForm.policyDocumentURL;
+
+      // Upload policy document if a file was selected
+      if (policyDocumentFile) {
+        setIsUploadingDocument(true);
+        try {
+          // Generate a temporary policy ID for the upload path
+          const tempPolicyId = editingPolicy?.policyId || `temp_${Date.now()}`;
+          documentURL = await container.storageService.uploadPolicyDocument(
+            policyDocumentFile,
+            user.uid,
+            tempPolicyId
+          );
+        } catch (error) {
+          setUploadError('Failed to upload policy document');
+          setIsUploadingDocument(false);
+          return;
+        } finally {
+          setIsUploadingDocument(false);
+        }
+      }
+
+      const policyData = {
+        ...policyForm,
+        policyDocumentURL: documentURL || undefined,
+        policyWebURL: policyForm.policyWebURL || undefined,
+        sharedFromPersonId: policyForm.sharedFromPersonId || undefined,
+      };
+
+      // Remove empty string values
+      Object.keys(policyData).forEach((key) => {
+        if (policyData[key as keyof typeof policyData] === '') {
+          delete policyData[key as keyof typeof policyData];
+        }
+      });
+
       if (editingPolicy) {
         // Update existing policy
-        await container.policyRepository.update(editingPolicy.policyId, policyForm);
+        await container.policyRepository.update(editingPolicy.policyId, policyData);
       } else {
         // Create new policy
         const db = (await import('@infrastructure/database/firebase')).getFirebaseFirestore();
@@ -128,18 +211,28 @@ export const ProfilesPage: React.FC = () => {
 
         await addDoc(policiesRef, {
           personId: selectedPerson.personId,
-          ...policyForm,
+          ...policyData,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         });
       }
 
       setShowPolicyForm(false);
-      setPolicyForm({ insurerId: '', policyType: PolicyType.HEALTH, policyNumber: '', isDefault: false });
+      setPolicyForm({
+        insurerId: '',
+        policyType: PolicyType.HEALTH,
+        policyNumber: '',
+        isDefault: false,
+        policyDocumentURL: '',
+        policyWebURL: '',
+        sharedFromPersonId: '',
+      });
+      setPolicyDocumentFile(null);
       setEditingPolicy(null);
       loadPolicies(selectedPerson.personId);
     } catch (error) {
       console.error('Failed to save policy:', error);
+      setUploadError('Failed to save policy');
     }
   };
 
@@ -150,8 +243,45 @@ export const ProfilesPage: React.FC = () => {
       policyType: policy.policyType,
       policyNumber: policy.policyNumber,
       isDefault: policy.isDefault,
+      policyDocumentURL: policy.policyDocumentURL || '',
+      policyWebURL: policy.policyWebURL || '',
+      sharedFromPersonId: policy.sharedFromPersonId || '',
     });
     setShowPolicyForm(true);
+  };
+
+  const handleSelectSharedPolicy = (sharedPolicyData: { policy: UserPolicy; person: InsuredPerson }) => {
+    const { policy, person } = sharedPolicyData;
+    setPolicyForm({
+      insurerId: policy.insurerId,
+      policyType: policy.policyType,
+      policyNumber: policy.policyNumber,
+      isDefault: false,
+      policyDocumentURL: policy.policyDocumentURL || '',
+      policyWebURL: policy.policyWebURL || '',
+      sharedFromPersonId: person.personId,
+    });
+  };
+
+  const handlePolicyDocumentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Validate file type (PDF, images)
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+      if (!allowedTypes.includes(file.type)) {
+        setUploadError('Please select a PDF or image file');
+        return;
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setUploadError('File size must be less than 10MB');
+        return;
+      }
+
+      setPolicyDocumentFile(file);
+      setUploadError(null);
+    }
   };
 
   const handleDeletePerson = async (personId: string) => {
@@ -416,8 +546,8 @@ export const ProfilesPage: React.FC = () => {
 
       {/* Add/Edit Policy Modal */}
       {showPolicyForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl my-8">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">
                 {editingPolicy ? 'Edit' : 'Add'} Insurance Policy
@@ -425,12 +555,53 @@ export const ProfilesPage: React.FC = () => {
               <button onClick={() => {
                 setShowPolicyForm(false);
                 setEditingPolicy(null);
-                setPolicyForm({ insurerId: '', policyType: PolicyType.HEALTH, policyNumber: '', isDefault: false });
+                setPolicyForm({
+                  insurerId: '',
+                  policyType: PolicyType.HEALTH,
+                  policyNumber: '',
+                  isDefault: false,
+                  policyDocumentURL: '',
+                  policyWebURL: '',
+                  sharedFromPersonId: '',
+                });
+                setPolicyDocumentFile(null);
+                setUploadError(null);
               }}>
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Choose Existing Policy */}
+              {!editingPolicy && availableSharedPolicies.length > 0 && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Users className="w-4 h-4 text-blue-600" />
+                    <label className="block text-sm font-medium text-blue-900">
+                      Or Choose Existing Policy from Family
+                    </label>
+                  </div>
+                  <select
+                    onChange={(e) => {
+                      const selected = availableSharedPolicies[parseInt(e.target.value)];
+                      if (selected) {
+                        handleSelectSharedPolicy(selected);
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select a shared policy...</option>
+                    {availableSharedPolicies.map((item, idx) => (
+                      <option key={idx} value={idx}>
+                        {item.person.fullName} - {item.insurer.insurerName} ({item.policy.policyNumber})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-blue-700 mt-1">
+                    Family members can share the same insurance policy
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium mb-1">Insurer</label>
                 <select
@@ -470,6 +641,52 @@ export const ProfilesPage: React.FC = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
+
+              {/* Policy Document Upload */}
+              <div>
+                <label className="block text-sm font-medium mb-1 flex items-center gap-2">
+                  <Upload className="w-4 h-4" />
+                  Upload Policy Document (Optional)
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,image/*"
+                  onChange={handlePolicyDocumentChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                {policyDocumentFile && (
+                  <p className="text-sm text-green-600 mt-1">
+                    Selected: {policyDocumentFile.name}
+                  </p>
+                )}
+                {policyForm.policyDocumentURL && !policyDocumentFile && (
+                  <p className="text-sm text-gray-600 mt-1">
+                    Current document attached
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Upload your policy document (PDF or image) for AI-powered coverage analysis
+                </p>
+              </div>
+
+              {/* Policy Web URL */}
+              <div>
+                <label className="block text-sm font-medium mb-1 flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4" />
+                  Online Policy URL (Optional)
+                </label>
+                <input
+                  type="url"
+                  value={policyForm.policyWebURL}
+                  onChange={(e) => setPolicyForm({ ...policyForm, policyWebURL: e.target.value })}
+                  placeholder="https://example.com/my-policy"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter the web URL if your policy is available online
+                </p>
+              </div>
+
               <div>
                 <label className="flex items-center gap-2">
                   <input
@@ -481,12 +698,20 @@ export const ProfilesPage: React.FC = () => {
                   <span className="text-sm">Set as default policy</span>
                 </label>
               </div>
+
+              {uploadError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+                  {uploadError}
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={handleSavePolicy}
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                  disabled={isUploadingDocument}
+                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Save
+                  {isUploadingDocument ? 'Uploading...' : 'Save'}
                 </button>
                 <button
                   onClick={() => setShowPolicyForm(false)}

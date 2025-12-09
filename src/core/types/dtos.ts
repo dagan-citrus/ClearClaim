@@ -56,6 +56,9 @@ export interface CreateUserPolicyDTO {
   policyType: PolicyType;
   policyNumber: string;
   isDefault?: boolean;
+  policyDocumentURL?: string;
+  policyWebURL?: string;
+  sharedFromPersonId?: UUID;
 }
 
 /**
@@ -65,6 +68,9 @@ export interface UpdateUserPolicyDTO {
   policyType?: PolicyType;
   policyNumber?: string;
   isDefault?: boolean;
+  policyDocumentURL?: string;
+  policyWebURL?: string;
+  sharedFromPersonId?: UUID;
 }
 
 /**
@@ -150,4 +156,14 @@ export interface RefineDraftDTO {
 export interface GenerateEmailDTO {
   claimId: UUID;
   templatePrompt?: string; // Optional override for insurer template
+}
+
+/**
+ * DTO for policy coverage test result
+ */
+export interface PolicyCoverageTestDTO {
+  status: 'Covered' | 'Not Covered' | 'Not Sure';
+  explanation: string;
+  relevantSections?: string[]; // References to relevant policy sections
+  confidence?: number; // 0-100 confidence level
 }
