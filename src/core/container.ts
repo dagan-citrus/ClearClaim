@@ -3,7 +3,7 @@
  */
 
 import { UserRepository, InsuredPersonRepository, InsurerRepository, PolicyRepository, ClaimRepository } from './repositories';
-import { SubscriptionService, ClaimProcessorService, ClaimGeneratorService, OneClickClaimService } from './services';
+import { SubscriptionService, ClaimProcessorService, ClaimGeneratorService, OneClickClaimService, PolicyCoverageService } from './services';
 import { AuthService } from '@infrastructure/auth';
 import { GeminiService } from '@infrastructure/llm';
 import { EmailService } from '@infrastructure/email';
@@ -31,6 +31,7 @@ class ServiceContainer {
   private _claimProcessorService?: ClaimProcessorService;
   private _claimGeneratorService?: ClaimGeneratorService;
   private _oneClickClaimService?: OneClickClaimService;
+  private _policyCoverageService?: PolicyCoverageService;
 
   // Repositories
   get userRepository(): UserRepository {
@@ -147,6 +148,18 @@ class ServiceContainer {
     return this._oneClickClaimService;
   }
 
+  get policyCoverageService(): PolicyCoverageService {
+    if (!this._policyCoverageService) {
+      this._policyCoverageService = new PolicyCoverageService(
+        this.policyRepository,
+        this.claimRepository,
+        this.geminiService,
+        this.storageService
+      );
+    }
+    return this._policyCoverageService;
+  }
+
   /**
    * Reset all services (useful for testing)
    */
@@ -164,6 +177,7 @@ class ServiceContainer {
     this._claimProcessorService = undefined;
     this._claimGeneratorService = undefined;
     this._oneClickClaimService = undefined;
+    this._policyCoverageService = undefined;
   }
 }
 

@@ -56,6 +56,9 @@ export interface CreateUserPolicyDTO {
   policyType: PolicyType;
   policyNumber: string;
   isDefault?: boolean;
+  policyDocumentURL?: string;
+  policyWebURL?: string;
+  sharedFromPersonId?: UUID;
 }
 
 /**
@@ -65,6 +68,9 @@ export interface UpdateUserPolicyDTO {
   policyType?: PolicyType;
   policyNumber?: string;
   isDefault?: boolean;
+  policyDocumentURL?: string;
+  policyWebURL?: string;
+  sharedFromPersonId?: UUID;
 }
 
 /**
@@ -86,10 +92,20 @@ export interface ClaimImageData {
 }
 
 /**
+ * Document data for claim processing
+ */
+export interface ClaimDocumentData {
+  data: string; // Base64 encoded document
+  type: string; // MIME type
+  description?: string; // Optional description (e.g., "Medical Report", "Prescription")
+}
+
+/**
  * DTO for creating a new claim
  */
 export interface CreateClaimDTO {
-  images: ClaimImageData[]; // Array of images (invoice, doctor's summary, medicine list, etc.)
+  images?: ClaimImageData[]; // Array of images (invoice, doctor's summary, medicine list, etc.)
+  documents?: ClaimDocumentData[]; // Array of documents (PDF, DOCX, TXT, etc.)
 }
 
 /**
@@ -150,4 +166,14 @@ export interface RefineDraftDTO {
 export interface GenerateEmailDTO {
   claimId: UUID;
   templatePrompt?: string; // Optional override for insurer template
+}
+
+/**
+ * DTO for policy coverage test result
+ */
+export interface PolicyCoverageTestDTO {
+  status: 'Covered' | 'Not Covered' | 'Not Sure';
+  explanation: string;
+  relevantSections?: string[]; // References to relevant policy sections
+  confidence?: number; // 0-100 confidence level
 }

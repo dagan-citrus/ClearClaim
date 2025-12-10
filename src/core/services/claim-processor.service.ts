@@ -61,7 +61,7 @@ export class ClaimProcessorService {
   }
 
   /**
-   * Process receipt images and create draft claim
+   * Process receipt images/documents and create draft claim
    */
   async processReceipt(
     appUserId: UUID,
@@ -70,8 +70,40 @@ export class ClaimProcessorService {
     // Enforce subscription limits
     await this.subscriptionService.enforceClaimSubmissionLimit(appUserId);
 
-    // Extract receipt data from all images using Gemini
-    const extractedData = await this.geminiService.extractReceiptData(dto.images);
+    let extractedData: ExtractedReceiptData;
+
+    // Determine processing strategy based on what was uploaded
+    const hasImages = dto.images && dto.images.length > 0;
+    const hasDocuments = dto.documents && dto.documents.length > 0;
+
+    if (hasDocuments && !hasImages) {
+      // Documents only - use text extraction
+      extractedData = await this.geminiService.extractReceiptDataFromDocuments(dto.documents!);
+    } else if (hasImages && !hasDocuments) {
+      // Images only - use OCR
+      extractedData = await this.geminiService.extractReceiptData(dto.images!);
+    } else if (hasImages && hasDocuments) {
+      // Both images and documents - combine results
+      // Process images first (OCR)
+      const imageData = await this.geminiService.extractReceiptData(dto.images!);
+      // Process documents
+      const docData = await this.geminiService.extractReceiptDataFromDocuments(dto.documents!);
+
+      // Merge the results - prefer image data but supplement with document data
+      extractedData = {
+        ...docData,
+        ...imageData,
+        // Combine line items from both sources
+        lineItems: [...(imageData.lineItems || []), ...(docData.lineItems || [])],
+        // Use the higher confidence score
+        extractionConfidence: Math.max(
+          imageData.extractionConfidence || 0,
+          docData.extractionConfidence || 0
+        ),
+      };
+    } else {
+      throw new Error('No images or documents provided for processing');
+    }
 
     // Create draft claim
     const claimId = generateUUID();
@@ -100,31 +132,68 @@ export class ClaimProcessorService {
       updatedAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
     });
 
-    // Upload images to Firebase Storage and store URLs in subcollection
+    // Upload images and documents to Firebase Storage and store URLs in subcollection
     const attachmentsRef = collection(db, 'claims', claimId, 'attachments');
-    for (let i = 0; i < dto.images.length; i++) {
-      const img = dto.images[i];
-      const fileName = img.description || `receipt_${i}.jpg`;
-      const mimeType = img.type || 'image/jpeg';
+    let attachmentIndex = 0;
 
-      // Upload to Storage and get download URL
-      const storageUrl = await this.storageService.uploadClaimAttachment(
-        claimId,
-        fileName,
-        img.data || '',
-        mimeType
-      );
+    // Store image attachments
+    if (dto.images) {
+      for (let i = 0; i < dto.images.length; i++) {
+        const img = dto.images[i];
+        const fileName = img.description || `image_${i}.jpg`;
+        const mimeType = img.type || 'image/jpeg';
 
-      const attachmentDoc = doc(attachmentsRef, `attachment_${i}`);
-      await setDoc(attachmentDoc, {
-        fileName,
-        mimeType,
-        storageUrl,
-        // Note: base64Data not stored in Firestore to avoid 1MB limit
-        // Frontend keeps base64 in memory for email attachments
-        order: i,
-        createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
-      });
+        // Upload to Storage and get download URL
+        const storageUrl = await this.storageService.uploadClaimAttachment(
+          claimId,
+          fileName,
+          img.data || '',
+          mimeType
+        );
+
+        const attachmentDoc = doc(attachmentsRef, `attachment_${attachmentIndex}`);
+        await setDoc(attachmentDoc, {
+          fileName,
+          mimeType,
+          storageUrl,
+          // Note: base64Data not stored in Firestore to avoid 1MB limit
+          // Frontend keeps base64 in memory for email attachments
+          order: attachmentIndex,
+          createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
+        });
+        attachmentIndex++;
+      }
+    }
+
+    // Store document attachments
+    if (dto.documents) {
+      for (let i = 0; i < dto.documents.length; i++) {
+        const doc_item = dto.documents[i];
+        const extension = doc_item.type.includes('pdf') ? 'pdf' :
+                         doc_item.type.includes('word') ? 'docx' : 'txt';
+        const fileName = doc_item.description || `document_${i}.${extension}`;
+        const mimeType = doc_item.type || 'application/octet-stream';
+
+        // Upload to Storage and get download URL
+        const storageUrl = await this.storageService.uploadClaimAttachment(
+          claimId,
+          fileName,
+          doc_item.data || '',
+          mimeType
+        );
+
+        const attachmentDoc = doc(attachmentsRef, `attachment_${attachmentIndex}`);
+        await setDoc(attachmentDoc, {
+          fileName,
+          mimeType,
+          storageUrl,
+          // Note: base64Data not stored in Firestore to avoid 1MB limit
+          // Frontend keeps base64 in memory for email attachments
+          order: attachmentIndex,
+          createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
+        });
+        attachmentIndex++;
+      }
     }
 
     return { claimId, extractedData };

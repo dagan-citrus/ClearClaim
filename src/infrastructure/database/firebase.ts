@@ -5,6 +5,7 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import { config } from '@config/index';
 
 /**
@@ -13,6 +14,7 @@ import { config } from '@config/index';
 let firebaseApp: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
 let firestoreInstance: Firestore | null = null;
+let storageInstance: FirebaseStorage | null = null;
 
 /**
  * Initialize Firebase app
@@ -46,4 +48,15 @@ export function getFirebaseFirestore(): Firestore {
     firestoreInstance = getFirestore(firebaseApp!);
   }
   return firestoreInstance;
+}
+
+/**
+ * Get Firebase Storage instance
+ */
+export function getFirebaseStorage(): FirebaseStorage {
+  if (!storageInstance) {
+    initializeFirebase();
+    storageInstance = getStorage(firebaseApp!);
+  }
+  return storageInstance;
 }

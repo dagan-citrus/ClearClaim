@@ -76,6 +76,9 @@ export interface UserPolicy {
   policyType: PolicyType;
   policyNumber: string;
   isDefault: boolean; // For One-Click claim workflow
+  policyDocumentURL?: string; // Firebase Storage URL for uploaded policy document
+  policyWebURL?: string; // Web URL for online policy document
+  sharedFromPersonId?: UUID; // If this policy is shared from another family member
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

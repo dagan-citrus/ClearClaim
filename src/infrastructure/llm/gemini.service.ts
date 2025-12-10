@@ -172,6 +172,91 @@ export class GeminiService {
   }
 
   /**
+   * Extract text from documents (PDF, DOCX, TXT, etc.)
+   * For now, we'll use a simplified approach - the base64 text content
+   * In a production app, you'd use proper PDF/DOCX parsers
+   */
+  private async extractDocumentText(document: { data: string; type: string; description?: string }): Promise<string> {
+    try {
+      // For text files, decode base64 directly
+      if (document.type.startsWith('text/') || document.type === 'application/json') {
+        return atob(document.data);
+      }
+
+      // For PDF and DOCX, we'll pass the base64 data to Gemini and ask it to extract text
+      // In a real implementation, you'd use pdf-parse, mammoth, etc.
+      const prompt = `Extract all text content from this ${document.type} document. Return only the extracted text, no additional commentary.`;
+
+      const result = await this.model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: document.data,
+            mimeType: document.type,
+          },
+        },
+      ]);
+
+      const response = await result.response;
+      return response.text();
+    } catch (error) {
+      console.error('Failed to extract document text:', error);
+      return `[Document: ${document.description || 'Unknown'}]`;
+    }
+  }
+
+  /**
+   * Extract receipt data from documents using text analysis
+   */
+  async extractReceiptDataFromDocuments(
+    documents: Array<{ data: string; type: string; description?: string }>
+  ): Promise<ExtractedReceiptData> {
+    try {
+      // Extract text from all documents
+      const documentTexts = await Promise.all(
+        documents.map(async (doc) => {
+          const text = await this.extractDocumentText(doc);
+          return `=== ${doc.description || 'Document'} ===\n${text}\n`;
+        })
+      );
+
+      const combinedText = documentTexts.join('\n\n');
+      const prompt = this.buildTextExtractionPrompt(combinedText, documents.length);
+
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      // Parse JSON response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new LLMProcessingError('Failed to extract JSON from LLM response');
+      }
+
+      const parsedData = JSON.parse(jsonMatch[0]);
+      const validatedData = receiptDataSchema.parse(parsedData);
+
+      return {
+        ...validatedData,
+        lineItems: validatedData.lineItems.map((item) => ({
+          ...item,
+          personId: undefined,
+        })),
+      };
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        console.error('Document Extraction Validation Error:', error.errors);
+        throw new LLMProcessingError(
+          `Receipt data validation failed: ${error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')}`
+        );
+      }
+      throw new LLMProcessingError(
+        `Failed to extract receipt data from documents: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
    * Extract receipt data from multiple images using Gemini Vision
    */
   async extractReceiptData(
@@ -442,6 +527,69 @@ Minimal example (only required info):
   }
 
   /**
+   * Build extraction prompt for text documents
+   */
+  private buildTextExtractionPrompt(documentText: string, documentCount: number): string {
+    return `You are a medical claim data extraction expert. You have been provided with text extracted from ${documentCount} document(s) that may contain:
+- Medical invoices/receipts
+- Doctor's reports and summaries
+- Medicine lists and prescriptions
+- Lab results
+- Other medical documentation
+
+DOCUMENT TEXT:
+${documentText}
+
+Extract the following information from the text above:
+
+BASIC CLAIM INFORMATION:
+1. retailerName: The name of the clinic/hospital/medical facility
+2. serviceDescription: Brief description of the medical service
+3. receiptDate: Date of the receipt/transaction in YYYY-MM-DD format
+4. totalAmount: Total amount paid (as a number)
+5. currency: Currency code (default to "USD" if not specified)
+6. invoiceNumber: Invoice number if present (optional)
+7. receiptNumber: Receipt number if present (optional)
+8. policyNumber: Insurance policy/member/card ID if visible (optional)
+9. paymentMethod: One of: CASH, CREDIT_CARD, DEBIT_CARD, CHECK, BANK_TRANSFER, OTHER
+10. lineItems: Array of ALL line items, each with description, amount, and optional quantity
+11. extractionConfidence: Your confidence level in the extraction (0-100)
+
+MEDICAL-SPECIFIC INFORMATION:
+12. doctorName: Full name of the doctor (optional)
+13. doctorTitle: Doctor's title/specialty (optional)
+14. clinicAddress: Full address of the clinic/hospital (optional)
+15. visitDate: Date of the medical visit in YYYY-MM-DD format (optional)
+16. medicalIssues: Array of medical issues/complaints addressed (optional)
+17. prescriptions: Array of prescribed medications/treatments (optional)
+18. recommendations: Additional recommendations (optional)
+19. claimType: Type of medical claim (optional)
+20. attachmentDescriptions: Array describing each document (optional)
+
+IMPORTANT:
+- Extract information from ALL provided documents
+- Combine information intelligently (don't duplicate)
+- Return ONLY valid JSON with no additional text
+- Omit fields you cannot extract confidently
+- The system will provide defaults for missing fields
+
+Return the data in JSON format matching this example:
+{
+  "retailerName": "City Medical Center",
+  "serviceDescription": "Medical consultation",
+  "receiptDate": "2025-01-15",
+  "totalAmount": 350.00,
+  "currency": "USD",
+  "paymentMethod": "CREDIT_CARD",
+  "lineItems": [
+    {"description": "Consultation", "amount": 200.00},
+    {"description": "Blood test", "amount": 150.00}
+  ],
+  "extractionConfidence": 90
+}`;
+  }
+
+  /**
    * Build prompt for claim email generation with detailed health insurance template
    */
   private buildClaimEmailPrompt(
@@ -541,6 +689,41 @@ Generate the email following the DEFAULT template structure shown above. Ensure 
 Email Subject: [subject line exactly as shown in template]
 
 [email body exactly as shown in template, with all the details filled in]`;
+  }
+
+  /**
+   * Analyze policy coverage for a claim
+   */
+  async analyzePolicyCoverage(prompt: string): Promise<{
+    status: 'Covered' | 'Not Covered' | 'Not Sure';
+    explanation: string;
+    relevantSections?: string[];
+    confidence?: number;
+  }> {
+    try {
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      // Parse JSON response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new LLMProcessingError('Failed to extract JSON from policy coverage response');
+      }
+
+      const parsedData = JSON.parse(jsonMatch[0]);
+
+      return {
+        status: parsedData.status || 'Not Sure',
+        explanation: parsedData.explanation || 'Unable to determine coverage',
+        relevantSections: parsedData.relevantSections,
+        confidence: parsedData.confidence,
+      };
+    } catch (error) {
+      throw new LLMProcessingError(
+        `Failed to analyze policy coverage: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
   }
 
   /**
