@@ -80,6 +80,31 @@ const receiptDataSchema = z
   });
 
 /**
+ * Parse and categorize API errors
+ */
+function categorizeError(error: any): { userMessage: string; rawError: string } {
+  const rawError = error instanceof Error ? error.message : String(error);
+  let userMessage = '';
+
+  // Check for specific error patterns
+  if (rawError.includes('API_KEY') || rawError.includes('API key') || rawError.includes('authentication')) {
+    userMessage = '🔑 Authentication Error: Invalid or missing API key. Please check your Gemini API configuration.';
+  } else if (rawError.includes('quota') || rawError.includes('rate limit') || rawError.includes('429')) {
+    userMessage = '⏱️ Quota Exceeded: API rate limit or quota reached. Please try again in a few minutes.';
+  } else if (rawError.includes('network') || rawError.includes('ECONNREFUSED') || rawError.includes('timeout')) {
+    userMessage = '🌐 Connection Error: Unable to connect to the AI service. Please check your internet connection and try again.';
+  } else if (rawError.includes('400') || rawError.includes('invalid image') || rawError.includes('cannot load')) {
+    userMessage = '📷 Image Error: The uploaded image is invalid or cannot be processed. Please try a different image.';
+  } else if (rawError.includes('500') || rawError.includes('503') || rawError.includes('server error')) {
+    userMessage = '⚠️ Server Error: The AI service is temporarily unavailable. Please try again in a few moments.';
+  } else {
+    userMessage = '❌ Processing Error: An unexpected error occurred while processing your request.';
+  }
+
+  return { userMessage, rawError };
+}
+
+/**
  * Retry utility with exponential backoff
  */
 async function retryWithBackoff<T>(
@@ -101,7 +126,21 @@ async function retryWithBackoff<T>(
         throw error;
       }
 
-      // If this was the last attempt, throw
+      // Check for non-retryable errors (auth, quota, invalid image)
+      const errorStr = String(error);
+      if (
+        errorStr.includes('API_KEY') ||
+        errorStr.includes('authentication') ||
+        errorStr.includes('quota') ||
+        errorStr.includes('400') ||
+        errorStr.includes('invalid image')
+      ) {
+        // Don't retry these errors
+        const { userMessage, rawError } = categorizeError(error);
+        throw new LLMProcessingError(`${userMessage}\n\nRaw error: ${rawError}`);
+      }
+
+      // If this was the last attempt, throw with categorized error
       if (attempt === maxRetries - 1) {
         break;
       }
@@ -114,8 +153,9 @@ async function retryWithBackoff<T>(
   }
 
   // All retries failed
+  const { userMessage, rawError } = categorizeError(lastError);
   throw new LLMProcessingError(
-    `API call failed after ${maxRetries} attempts. Please try again later. ${lastError ? `Last error: ${lastError.message}` : ''}`
+    `${userMessage}\n\nAfter ${maxRetries} retry attempts.\n\nRaw error: ${rawError}`
   );
 }
 
@@ -171,6 +211,31 @@ export class GeminiService {
       const parsedData = JSON.parse(jsonMatch[0]);
       const validatedData = receiptDataSchema.parse(parsedData);
 
+      // Check for low confidence
+      if (validatedData.extractionConfidence < 30) {
+        throw new LLMProcessingError(
+          `⚠️ Low Confidence: The image text could not be read clearly (${validatedData.extractionConfidence}% confidence).\n\nPlease try:\n- Taking a clearer photo\n- Ensuring good lighting\n- Avoiding glare or shadows\n- Using a higher resolution image\n\nRaw error: Extraction confidence too low (${validatedData.extractionConfidence}%)`
+        );
+      }
+
+      // Check for missing critical data
+      if (validatedData.totalAmount === 0 && (!validatedData.lineItems || validatedData.lineItems.length === 0)) {
+        throw new LLMProcessingError(
+          `📄 No Data Found: Could not extract any financial information from the image.\n\nPlease ensure:\n- The image contains a receipt or invoice\n- The text is clearly visible\n- The document includes amounts and descriptions\n\nRaw error: No amount or line items extracted`
+        );
+      }
+
+      // Check if image appears to have no text
+      if (
+        validatedData.retailerName === 'Unknown Provider' &&
+        validatedData.serviceDescription === 'Medical/Healthcare Service' &&
+        validatedData.totalAmount === 0
+      ) {
+        throw new LLMProcessingError(
+          `🖼️ No Text Detected: The image appears to contain no readable text.\n\nPlease check:\n- The image is not blank or corrupted\n- The image contains a receipt or document\n- The text in the image is legible\n\nRaw error: No meaningful data could be extracted (all default values)`
+        );
+      }
+
       return {
         ...validatedData,
         lineItems: validatedData.lineItems.map((item) => ({
@@ -179,14 +244,18 @@ export class GeminiService {
         })),
       };
     } catch (error) {
+      if (error instanceof LLMProcessingError) {
+        // Already formatted, re-throw as-is
+        throw error;
+      }
       if (error instanceof z.ZodError) {
         console.error('Gemini OCR Response Validation Error:', error.errors);
         throw new LLMProcessingError(
-          `Receipt data validation failed: ${error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')}`
+          `📋 Validation Error: The extracted data format is invalid.\n\n${error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('\n')}\n\nRaw error: Zod validation failed`
         );
       }
       throw new LLMProcessingError(
-        `Failed to extract receipt data: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `❌ Processing Error: Failed to extract receipt data.\n\nRaw error: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
@@ -232,8 +301,11 @@ export class GeminiService {
 
       return { subject, body };
     } catch (error) {
+      if (error instanceof LLMProcessingError) {
+        throw error;
+      }
       throw new LLMProcessingError(
-        `Failed to generate claim email: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `✉️ Email Generation Error: Failed to generate claim email.\n\nRaw error: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
@@ -280,8 +352,11 @@ Subject: [subject line here]
 
       return { subject, body };
     } catch (error) {
+      if (error instanceof LLMProcessingError) {
+        throw error;
+      }
       throw new LLMProcessingError(
-        `Failed to refine email draft: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `✨ Refinement Error: Failed to refine email draft.\n\nRaw error: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
