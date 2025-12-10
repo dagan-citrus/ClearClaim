@@ -30,7 +30,8 @@ export class ClaimRepository extends BaseRepository<Claim> {
         return {
           fileName: data.fileName,
           mimeType: data.mimeType,
-          base64Data: data.base64Data,
+          storageUrl: data.storageUrl,
+          base64Data: data.base64Data, // Keep for backwards compatibility
         };
       });
     } catch (error) {

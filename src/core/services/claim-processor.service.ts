@@ -21,6 +21,7 @@ import {
   InsurerRepository,
 } from '@core/repositories';
 import { GeminiService } from '@infrastructure/llm';
+import { StorageService } from '@infrastructure/storage';
 import { generateUUID, now } from '@core/utils';
 import { SubscriptionService } from './subscription.service';
 
@@ -34,7 +35,8 @@ export class ClaimProcessorService {
     private policyRepository: PolicyRepository,
     private insurerRepository: InsurerRepository,
     private geminiService: GeminiService,
-    private subscriptionService: SubscriptionService
+    private subscriptionService: SubscriptionService,
+    private storageService: StorageService
   ) {}
 
   /**
@@ -130,7 +132,7 @@ export class ClaimProcessorService {
       updatedAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
     });
 
-    // Store attachments in subcollection to avoid Firestore nested entity limits
+    // Upload images and documents to Firebase Storage and store URLs in subcollection
     const attachmentsRef = collection(db, 'claims', claimId, 'attachments');
     let attachmentIndex = 0;
 
@@ -138,11 +140,24 @@ export class ClaimProcessorService {
     if (dto.images) {
       for (let i = 0; i < dto.images.length; i++) {
         const img = dto.images[i];
+        const fileName = img.description || `image_${i}.jpg`;
+        const mimeType = img.type || 'image/jpeg';
+
+        // Upload to Storage and get download URL
+        const storageUrl = await this.storageService.uploadClaimAttachment(
+          claimId,
+          fileName,
+          img.data || '',
+          mimeType
+        );
+
         const attachmentDoc = doc(attachmentsRef, `attachment_${attachmentIndex}`);
         await setDoc(attachmentDoc, {
-          fileName: img.description || `image_${i}.jpg`,
-          mimeType: img.type || 'image/jpeg',
-          base64Data: img.data || '',
+          fileName,
+          mimeType,
+          storageUrl,
+          // Note: base64Data not stored in Firestore to avoid 1MB limit
+          // Frontend keeps base64 in memory for email attachments
           order: attachmentIndex,
           createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
         });
@@ -154,13 +169,26 @@ export class ClaimProcessorService {
     if (dto.documents) {
       for (let i = 0; i < dto.documents.length; i++) {
         const doc_item = dto.documents[i];
-        const attachmentDoc = doc(attachmentsRef, `attachment_${attachmentIndex}`);
         const extension = doc_item.type.includes('pdf') ? 'pdf' :
                          doc_item.type.includes('word') ? 'docx' : 'txt';
+        const fileName = doc_item.description || `document_${i}.${extension}`;
+        const mimeType = doc_item.type || 'application/octet-stream';
+
+        // Upload to Storage and get download URL
+        const storageUrl = await this.storageService.uploadClaimAttachment(
+          claimId,
+          fileName,
+          doc_item.data || '',
+          mimeType
+        );
+
+        const attachmentDoc = doc(attachmentsRef, `attachment_${attachmentIndex}`);
         await setDoc(attachmentDoc, {
-          fileName: doc_item.description || `document_${i}.${extension}`,
-          mimeType: doc_item.type || 'application/octet-stream',
-          base64Data: doc_item.data || '',
+          fileName,
+          mimeType,
+          storageUrl,
+          // Note: base64Data not stored in Firestore to avoid 1MB limit
+          // Frontend keeps base64 in memory for email attachments
           order: attachmentIndex,
           createdAt: (await import('firebase/firestore')).Timestamp.fromMillis(timestamp),
         });

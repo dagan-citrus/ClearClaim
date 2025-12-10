@@ -118,7 +118,8 @@ class ServiceContainer {
         this.policyRepository,
         this.insurerRepository,
         this.geminiService,
-        this.subscriptionService
+        this.subscriptionService,
+        this.storageService
       );
     }
     return this._claimProcessorService;
